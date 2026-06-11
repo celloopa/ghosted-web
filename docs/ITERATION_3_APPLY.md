@@ -66,6 +66,39 @@ Geist throughout, zero decoration that doesn't carry information.
 - The localStorage repo remains the logged-out/demo path; the Payload local
   API becomes the real one behind the same port.
 
+## Deployment (decided 2026-06-11): Coolify on Hetzner
+
+Self-hosted via Cello's existing Coolify server — not Vercel. Deploys only
+after the user-1 test passes. What this changes, all favorably:
+
+- **Database**: SQLite + persistent volume in both dev and prod (no Docker
+  on the dev machine, and dev/prod parity beats adapter divergence). Backup =
+  Litestream or a nightly file copy to object storage. Revisit Postgres
+  (Coolify one-click) only if concurrent users actually demand it.
+- **PDF rendering**: `typst` installs in the Docker image — real server-side
+  rendering, no serverless workarounds. (A reason Vercel was a worse fit.)
+- **Agent auth on the server**: `local_cli` doesn't exist there. Cello's own
+  hosted runs use a `claude setup-token` subscription token as a Coolify
+  secret; other users bring their own token/key via the Connect step.
+- **Build**: `output: "standalone"` in next.config + a small Dockerfile
+  (Coolify nixpacks can also auto-build, but the explicit Dockerfile carries
+  the typst install). Write these in the Payload session so the app is
+  deployable from its first server commit.
+- **Analytics/observability**: PostHog cloud free tier, or self-hosted
+  Umami/GlitchTip on the same Coolify box if keeping everything first-party.
+- **TLS/domain**: Coolify + Let's Encrypt; suggest a subdomain of
+  cello.design.
+
+## Observability & stranger-readiness (deferred until after user-1 test)
+
+Blockers before strangers: server-side persistence (Payload), error boundary +
+Sentry/GlitchTip, keys moved server-side encrypted. Product instrumentation:
+5 PostHog events — signed_up, application_added, response_logged,
+import_completed, apply_flow_started. Agent route ships with per-run logging
+from its first commit: user, application, model, tokens in/out, duration,
+outcome — plus per-user caps. Trust surface: privacy note, account deletion,
+landing page (weekend-2 items).
+
 ## Build order (next sessions)
 
 1. Payload 3 into apps/web: SQLite adapter (dev), users + applications +
