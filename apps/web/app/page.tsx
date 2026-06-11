@@ -1,72 +1,127 @@
-import { isGhosted, needsFollowUp, GHOST_THRESHOLD_DAYS, type Application } from '@ghosted/core'
+'use client'
 
-// Placeholder page: proves the monorepo wiring (web → tested core) and the
-// token system. Real screens start with M3 — see docs/M3_CHECKLIST.md.
-const sample: Application = {
-  id: 'demo',
-  company: 'Somewhere Great',
-  position: 'Design Engineer',
-  role_type: 'design_engineer',
-  status: 'applied',
-  date_applied: '2026-05-20',
-  events: [{ type: 'applied', date: '2026-05-20' }],
-}
+import Link from 'next/link'
+import { useState } from 'react'
+import { isGhosted, needsFollowUp, type Application } from '@ghosted/core'
+import { useApps } from '../lib/useApps'
+import { strings } from '../lib/strings'
+import { sampleApps } from '../lib/sample'
+import { relDays, todayISO } from '../lib/dates'
+import { GhostBadge } from '../components/Badge'
 
-export default function Home() {
-  const today = new Date().toISOString().slice(0, 10)
-  const ghosted = isGhosted(sample, today)
-  const followUp = needsFollowUp(sample, today)
+// Today: answer "what should I do right now?" in one glance, then get out
+// of the way. Follow-ups due → fresh ghosts → recent responses (quiet).
+export default function Today() {
+  const { apps, logEvent, importApps } = useApps()
+  const [justLogged, setJustLogged] = useState<string | null>(null)
+  const today = todayISO()
+
+  if (apps === null) return null
+
+  const followUps = apps.filter((a) => needsFollowUp(a, today))
+  const ghosts = apps.filter((a) => isGhosted(a, today) && !needsFollowUp(a, today))
+  const recentResponses = apps.filter((a) =>
+    a.events.some(
+      (e) =>
+        !e.corrected &&
+        (e.type === 'response' || e.type === 'interview') &&
+        Date.parse(today) - Date.parse(e.date) <= 7 * 86_400_000,
+    ),
+  )
+
+  const nothingToDo = followUps.length === 0 && ghosts.length === 0
 
   return (
-    <main style={{ maxWidth: 560, margin: '0 auto', padding: '96px 24px' }}>
-      <h1 style={{ fontSize: 28, marginBottom: 8 }}>Ghosted</h1>
-      <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>Silence, measured.</p>
+    <div>
+      <h1 className="page-title">Today</h1>
 
-      <div
-        style={{
-          background: 'var(--bg-surface)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-card)',
-          padding: 16,
-          marginTop: 32,
-        }}
-      >
-        <div style={{ fontWeight: 500 }}>{sample.company}</div>
-        <div style={{ color: 'var(--text-muted)', fontSize: 14 }}>{sample.position}</div>
-        <div style={{ marginTop: 12, display: 'flex', gap: 8, fontFamily: 'var(--font-data)', fontSize: 12 }}>
-          <span style={{ color: 'var(--text-muted)' }}>{sample.status}</span>
-          {ghosted && (
-            <span
-              style={{
-                color: 'var(--state-ghost)',
-                background: 'var(--state-ghost-bg)',
-                borderRadius: 'var(--radius-badge)',
-                padding: '2px 6px',
-              }}
-              title={`No response in ${GHOST_THRESHOLD_DAYS} days. Officially a ghost. It's them, not you.`}
-            >
-              👻 ghosted
-            </span>
-          )}
-          {followUp && (
-            <span
-              style={{
-                color: 'var(--state-followup)',
-                background: 'var(--state-followup-bg)',
-                borderRadius: 'var(--radius-badge)',
-                padding: '2px 6px',
-              }}
-            >
-              ⏰ follow up
-            </span>
-          )}
+      {apps.length === 0 && (
+        <div className="card empty-state">
+          <p>{strings.todayEmptyNoApps}</p>
+          <div className="row gap">
+            <Link href="/applications/new" className="btn btn-primary">
+              {strings.addCta}
+            </Link>
+            <button className="btn" onClick={() => importApps(sampleApps(today))}>
+              Load 3 sample applications
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
-      <p style={{ color: 'var(--text-muted)', fontSize: 14, marginTop: 32 }}>
-        The badges above are computed by <code>@ghosted/core</code> — 44 tests, zero bookkeeping.
-        Screens arrive with M3.
-      </p>
-    </main>
+      {apps.length > 0 && nothingToDo && (
+        <div className="card empty-state">
+          <p>{strings.todayEmpty}</p>
+        </div>
+      )}
+
+      {followUps.length > 0 && (
+        <section className="section">
+          <h2 className="section-title">Follow-ups due</h2>
+          <p className="dim small">{strings.followUpNudge}</p>
+          {followUps.map((app) => (
+            <TodayItem key={app.id} app={app} today={today}>
+              <button
+                className="btn btn-small"
+                onClick={async () => {
+                  await logEvent(app, 'follow_up')
+                  setJustLogged(app.id)
+                }}
+              >
+                Logged it
+              </button>
+            </TodayItem>
+          ))}
+        </section>
+      )}
+
+      {ghosts.length > 0 && (
+        <section className="section">
+          <h2 className="section-title">Gone quiet</h2>
+          {ghosts.map((app) => (
+            <TodayItem key={app.id} app={app} today={today}>
+              <GhostBadge />
+              <button className="btn btn-small" onClick={() => logEvent(app, 'follow_up')}>
+                Follow up anyway
+              </button>
+            </TodayItem>
+          ))}
+        </section>
+      )}
+
+      {recentResponses.length > 0 && (
+        <section className="section">
+          <h2 className="section-title dim">Recent responses</h2>
+          {recentResponses.map((app) => (
+            <TodayItem key={app.id} app={app} today={today}>
+              <span className="success small">{strings.responseLogged}</span>
+            </TodayItem>
+          ))}
+        </section>
+      )}
+
+      {justLogged && <p className="dim small">Follow-up logged. Quiet again for 7 days.</p>}
+    </div>
+  )
+}
+
+function TodayItem({
+  app,
+  today,
+  children,
+}: {
+  app: Application
+  today: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="card today-item">
+      <Link href={`/applications/${app.id}`} className="today-item-link">
+        <span className="app-row-company">{app.company}</span>
+        <span className="dim"> — {app.position}</span>
+        {app.date_applied && <span className="mono dim small"> · applied {relDays(app.date_applied, today)} ago</span>}
+      </Link>
+      <div className="row gap">{children}</div>
+    </div>
   )
 }
