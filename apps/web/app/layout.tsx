@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 import { Nav } from '../components/Nav'
 import { RepoProvider } from '../lib/useApps'
+import { BaselineProvider } from '../lib/useBaseline'
 
 export const metadata: Metadata = {
   title: 'Ghosted — silence, measured.',
@@ -13,8 +14,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <RepoProvider>
-          <Nav />
-          <main className="page">{children}</main>
+          <BaselineProvider>
+            <Nav />
+            <main className="page">{children}</main>
+          </BaselineProvider>
         </RepoProvider>
       </body>
     </html>

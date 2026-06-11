@@ -1,16 +1,24 @@
 'use client'
 
+import Link from 'next/link'
 import { useState } from 'react'
-import { parseV1Import } from '@ghosted/core'
+import { parseV1Import, validateCVJson } from '@ghosted/core'
 import { useApps } from '../../lib/useApps'
+import { useBaseline } from '../../lib/useBaseline'
 import { strings } from '../../lib/strings'
 
 // Import/export keeps the local-first escape hatch. parseV1Import accepts
 // v1 (Go ghosted) and ghosted2 CLI JSON: `ghosted2 list --json` pipes in.
 export default function Settings() {
   const { apps, importApps, replaceAll } = useApps()
+  const { baseline, status, clear: clearBaseline } = useBaseline()
   const [message, setMessage] = useState<string | null>(null)
   const [errors, setErrors] = useState<string[]>([])
+
+  const cvName =
+    baseline?.cv_json && validateCVJson(baseline.cv_json).ok
+      ? (validateCVJson(baseline.cv_json) as { ok: true; summary: { name: string } }).summary.name
+      : null
 
   async function handleFile(file: File) {
     setMessage(null)
@@ -38,6 +46,38 @@ export default function Settings() {
   return (
     <div className="narrow">
       <h1 className="page-title">Settings</h1>
+
+      <section className="section">
+        <h2 className="section-title">Baseline</h2>
+        {status?.ready ? (
+          <p className="small">
+            <span className="success">✓ ready</span>
+            {cvName && <span className="dim"> — CV: {cvName}</span>}
+            {status.recommended.length > 0 && (
+              <span className="dim"> · recommended: {status.recommended.join(', ')}</span>
+            )}
+          </p>
+        ) : (
+          <p className="small dim">Not set up yet{status && status.missing.length > 0 && <> — missing: {status.missing.join(', ')}</>}.</p>
+        )}
+        <div className="row gap">
+          <Link href="/onboarding" className="btn">
+            {status?.ready ? 'Edit baseline' : 'Set up baseline'}
+          </Link>
+          {status?.ready && (
+            <button
+              className="btn-link danger"
+              onClick={async () => {
+                if (confirm('Clear the baseline? The agent loses its facts until you redo this.')) {
+                  await clearBaseline()
+                }
+              }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      </section>
 
       <section className="section">
         <h2 className="section-title">Import</h2>

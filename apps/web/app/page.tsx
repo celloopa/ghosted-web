@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { isGhosted, needsFollowUp, type Application } from '@ghosted/core'
 import { useApps } from '../lib/useApps'
+import { useBaseline } from '../lib/useBaseline'
 import { strings } from '../lib/strings'
 import { sampleApps } from '../lib/sample'
 import { relDays, todayISO } from '../lib/dates'
@@ -13,6 +14,7 @@ import { GhostBadge } from '../components/Badge'
 // of the way. Follow-ups due → fresh ghosts → recent responses (quiet).
 export default function Today() {
   const { apps, logEvent, importApps } = useApps()
+  const { status: baselineReady } = useBaseline()
   const [justLogged, setJustLogged] = useState<string | null>(null)
   const today = todayISO()
 
@@ -34,6 +36,16 @@ export default function Today() {
   return (
     <div>
       <h1 className="page-title">Today</h1>
+
+      {baselineReady && !baselineReady.ready && (
+        <Link href="/onboarding" className="card baseline-nudge">
+          <span>
+            <strong>Set up your baseline</strong>
+            <span className="dim"> — CV, voice, targeting. One time, ~10 minutes. The agent writes from your facts; this is where the facts come from.</span>
+          </span>
+          <span className="btn btn-small">Start</span>
+        </Link>
+      )}
 
       {apps.length === 0 && (
         <div className="card empty-state">

@@ -353,3 +353,42 @@ a {
   border-radius: 3px;
   transition: width var(--motion-move);
 }
+
+/* ---- onboarding ---- */
+
+.steps {
+  display: flex;
+  gap: 4px;
+  margin: 16px 0 8px;
+}
+
+.step-dot {
+  font: inherit;
+  font-size: 13px;
+  font-family: var(--font-data);
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid var(--border-subtle);
+  padding: 6px 10px;
+  cursor: default;
+}
+.step-done { color: var(--text-primary); border-bottom-color: var(--state-success); cursor: pointer; }
+.step-current { color: var(--text-primary); border-bottom-color: var(--accent); }
+
+.cv-paste { margin-top: 8px; font-size: 13px; }
+.cv-summary { padding: 10px 12px; }
+.link-label { max-width: 140px; }
+
+.baseline-nudge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-color: var(--accent);
+}
+
+.btn:disabled, .btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

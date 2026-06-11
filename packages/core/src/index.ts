@@ -4,3 +4,4 @@ export { isGhosted, needsFollowUp, appliedDate, GHOST_THRESHOLD_DAYS, FOLLOW_UP_
 export { computeStats, deriveSource, LOW_DATA_THRESHOLD } from './stats'
 export { parseV1Import } from './importV1'
 export { daysBetween } from './dates'
+export * from './baseline'
