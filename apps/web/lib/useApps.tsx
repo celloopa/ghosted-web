@@ -11,7 +11,7 @@ import {
 import { ApplicationRepo, LocalStorageRepo } from './repo'
 import { todayISO } from './dates'
 
-const RepoContext = createContext<ApplicationRepo | null>(null)
+const RepoContext = createContext<ApplicationRepo>(new LocalStorageRepo())
 
 export function RepoProvider({ repo, children }: { repo?: ApplicationRepo; children: React.ReactNode }) {
   const value = useMemo(() => repo ?? new LocalStorageRepo(), [repo])
@@ -20,7 +20,6 @@ export function RepoProvider({ repo, children }: { repo?: ApplicationRepo; child
 
 export function useApps() {
   const repo = useContext(RepoContext)
-  if (!repo) throw new Error('useApps must be used inside <RepoProvider>')
 
   const [apps, setApps] = useState<Application[] | null>(null)
 

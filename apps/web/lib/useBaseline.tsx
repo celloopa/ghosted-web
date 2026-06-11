@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { baselineStatus, type Baseline } from '@ghosted/core'
 import { BaselineRepo, LocalStorageBaselineRepo } from './baselineRepo'
 
-const BaselineContext = createContext<BaselineRepo | null>(null)
+const BaselineContext = createContext<BaselineRepo>(new LocalStorageBaselineRepo())
 
 export function BaselineProvider({ repo, children }: { repo?: BaselineRepo; children: React.ReactNode }) {
   const value = useMemo(() => repo ?? new LocalStorageBaselineRepo(), [repo])
@@ -13,7 +13,6 @@ export function BaselineProvider({ repo, children }: { repo?: BaselineRepo; chil
 
 export function useBaseline() {
   const repo = useContext(BaselineContext)
-  if (!repo) throw new Error('useBaseline must be used inside <BaselineProvider>')
 
   const [baseline, setBaseline] = useState<Baseline | null>(null)
 

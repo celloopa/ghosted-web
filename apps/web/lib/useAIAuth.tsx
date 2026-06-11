@@ -4,7 +4,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { AIAuth } from '@ghosted/core'
 import { AIAuthRepo, LocalStorageAIAuthRepo } from './aiAuthRepo'
 
-const AIAuthContext = createContext<AIAuthRepo | null>(null)
+// Defaults to the real localStorage repo so the hook works without a
+// provider (and survives stale-HMR layout chunks); the provider exists for
+// test injection.
+const AIAuthContext = createContext<AIAuthRepo>(new LocalStorageAIAuthRepo())
 
 export function AIAuthProvider({ repo, children }: { repo?: AIAuthRepo; children: React.ReactNode }) {
   const value = useMemo(() => repo ?? new LocalStorageAIAuthRepo(), [repo])
@@ -13,7 +16,6 @@ export function AIAuthProvider({ repo, children }: { repo?: AIAuthRepo; children
 
 export function useAIAuth() {
   const repo = useContext(AIAuthContext)
-  if (!repo) throw new Error('useAIAuth must be used inside <AIAuthProvider>')
 
   const [auth, setAuth] = useState<AIAuth | null | undefined>(undefined) // undefined = loading
 
