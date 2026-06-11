@@ -1,0 +1,10 @@
+{
+  "name": "ghosted-web",
+  "private": true,
+  "scripts": {
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "dev": "pnpm --filter web dev"
+  },
+  "packageManager": "pnpm@11.0.3"
+}
