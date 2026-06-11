@@ -1,7 +1,15 @@
 'use client'
 
-import { useState } from 'react'
-import { validateAIAuth, type AIAuth, type AIAuthMethod, type AIProvider } from '@ghosted/core'
+import { useEffect, useState } from 'react'
+import {
+  DEFAULT_MODEL_BY_PROVIDER,
+  FALLBACK_MODEL_CATALOG,
+  validateAIAuth,
+  type AIAuth,
+  type AIAuthMethod,
+  type AIProvider,
+  type ModelCatalogEntry,
+} from '@ghosted/core'
 
 // No humor here — auth is one of the surfaces where the voice goes plain
 // (decision interview §2).
@@ -40,6 +48,14 @@ const OPTIONS: {
     needsKey: true,
   },
   {
+    id: 'codex-cli',
+    provider: 'codex',
+    method: 'local_cli',
+    label: 'Codex on this machine',
+    detail: 'Uses your local Codex CLI login and subscription. Recommended if you want Codex as the applying agent while staying local.',
+    needsKey: false,
+  },
+  {
     id: 'oai-key',
     provider: 'openai',
     method: 'api_key',
@@ -49,18 +65,42 @@ const OPTIONS: {
   },
 ]
 
+function dollarsPerMTok(price?: number) {
+  return price === undefined ? 'unknown' : `$${(price * 1_000_000).toFixed(price * 1_000_000 < 1 ? 2 : 0)}/1M`
+}
+
 export function ConnectAI({ onConnect, current }: { onConnect: (auth: AIAuth) => void | Promise<void>; current?: AIAuth | null }) {
   const [selected, setSelected] = useState<string | null>(
     current ? OPTIONS.find((o) => o.provider === current.provider && o.method === current.method)?.id ?? null : null,
   )
   const [key, setKey] = useState('')
+  const [model, setModel] = useState(current?.model ?? (current ? DEFAULT_MODEL_BY_PROVIDER[current.provider] : ''))
+  const [catalog, setCatalog] = useState<ModelCatalogEntry[]>(FALLBACK_MODEL_CATALOG)
+  const [catalogSource, setCatalogSource] = useState('fallback')
   const [error, setError] = useState<string | null>(null)
 
+  useEffect(() => {
+    let alive = true
+    void fetch('/api/models')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { models?: ModelCatalogEntry[]; refreshed?: number } | null) => {
+        if (!alive || !data?.models) return
+        setCatalog(data.models)
+        setCatalogSource(data.refreshed && data.refreshed > 0 ? `OpenRouter refreshed ${data.refreshed}` : 'fallback')
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [])
+
   const option = OPTIONS.find((o) => o.id === selected)
+  const modelOptions = option ? catalog.filter((m) => m.provider === option.provider) : []
+  const selectedModel = option ? model || DEFAULT_MODEL_BY_PROVIDER[option.provider] : ''
 
   async function submit() {
     if (!option) return
-    const auth: AIAuth = { provider: option.provider, method: option.method }
+    const auth: AIAuth = { provider: option.provider, method: option.method, model: selectedModel }
     if (option.needsKey) auth.key = key.trim()
     const result = validateAIAuth(auth)
     if (!result.ok) return setError(result.message)
@@ -78,6 +118,7 @@ export function ConnectAI({ onConnect, current }: { onConnect: (auth: AIAuth) =>
             className={`chip connect-option${selected === o.id ? ' chip-selected' : ''}`}
             onClick={() => {
               setSelected(o.id)
+              setModel(DEFAULT_MODEL_BY_PROVIDER[o.provider])
               setError(null)
             }}
           >
@@ -89,6 +130,28 @@ export function ConnectAI({ onConnect, current }: { onConnect: (auth: AIAuth) =>
           </button>
         ))}
       </div>
+
+      {option && modelOptions.length > 0 && (
+        <label className="field">
+          <span className="field-label">Model</span>
+          <select className="input" value={selectedModel} onChange={(e) => setModel(e.target.value)}>
+            {modelOptions.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label} — {m.modelClass}
+              </option>
+            ))}
+          </select>
+          {(() => {
+            const picked = modelOptions.find((m) => m.id === selectedModel)
+            return (
+              <span className="chip-examples">
+                {picked?.detail ?? catalogSource}
+                {picked?.pricing && ` · est. ${dollarsPerMTok(picked.pricing.input)} in / ${dollarsPerMTok(picked.pricing.output)} out`}
+              </span>
+            )
+          })()}
+        </label>
+      )}
 
       {option?.needsKey && (
         <label className="field">

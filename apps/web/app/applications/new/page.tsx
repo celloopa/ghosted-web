@@ -14,9 +14,10 @@ export default function NewApplication() {
       <CaptureForm
         onSubmit={async (app) => {
           await addApplication(app)
-          // Materials-needed lands on its detail page (the future apply
-          // workspace); everything else goes back to the list.
-          router.push(app.needs_materials ? `/applications/${app.id}` : '/applications')
+          // If the user explicitly asks for materials, take them straight
+          // into the apply workspace. The detail page can still link there,
+          // but it should not be an extra step in this intent path.
+          router.push(app.needs_materials ? `/apply?id=${app.id}` : '/applications')
         }}
       />
     </div>

@@ -39,7 +39,33 @@ export interface Application {
   needs_materials?: boolean
   /** Saved-with-intent: Today nudges on this date. */
   remind_at?: string
+  /** Apply-flow analysis: deterministic posting parse + fit (no model). */
+  posting?: PostingRecord
+  /** Apply-flow output: deterministic assembly + the two LLM-written pieces. */
+  materials?: Materials
   events: ApplicationEvent[]
+}
+
+export interface PostingRecord {
+  url?: string
+  description: string
+  fit_score: number
+  fit_notes: string[]
+  matched: string[]
+  missing: string[]
+  analyzed_at: string
+}
+
+export interface Materials {
+  summary?: string
+  cover_letter?: string
+  resume_adjustments?: string
+  resume_rewrites?: { source: string; rewrite: string; why: string }[]
+  opportunity_angles?: { title: string; evidence: string; use: string }[]
+  standout_suggestions?: { title: string; action: string; effort: 'low' | 'medium' | 'high' }[]
+  generated_at?: string
+  model?: string
+  revisions?: number
 }
 
 export interface TransitionError {

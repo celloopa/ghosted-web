@@ -90,7 +90,7 @@ describe('CaptureForm (M3: one form, ≤7 fields, role_type required)', () => {
     fill(/job title/i, 'Design Engineer')
     fireEvent.click(screen.getByRole('button', { name: /Brand \/ Motion/s }))
     fireEvent.click(screen.getByRole('button', { name: /I need materials/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'Add application' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to materials' }))
 
     await waitFor(() => expect(captured).toBeDefined())
     expect(captured!).toMatchObject({ status: 'saved', needs_materials: true })

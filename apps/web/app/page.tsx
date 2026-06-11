@@ -111,17 +111,17 @@ export default function Today() {
       {prep.length > 0 && (
         <section className="section">
           <h2 className="section-title">Materials to prepare</h2>
-          <p className="dim small">
-            Cover letter + resume adjustments before applying. The in-app apply flow is coming — meanwhile{' '}
-            <span className="mono">ghosted2 new &lt;url&gt;</span> drafts these today.
-          </p>
+          <p className="dim small">Cover letter + resume adjustments before applying.</p>
           {prep.map((app) => (
             <TodayItem key={app.id} app={app} today={today}>
+              <Link href={`/apply?id=${app.id}`} className="btn btn-small">
+                Open workspace
+              </Link>
               <button
-                className="btn btn-small"
+                className="btn-link"
                 onClick={() => transitionTo({ ...app, needs_materials: undefined }, 'applied')}
               >
-                Materials done — applying
+                already applied
               </button>
             </TodayItem>
           ))}

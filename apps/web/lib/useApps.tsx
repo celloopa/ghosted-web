@@ -11,16 +11,28 @@ import {
 import { ApplicationRepo, LocalStorageRepo } from './repo'
 import { todayISO } from './dates'
 
-const RepoContext = createContext<ApplicationRepo>(new LocalStorageRepo())
+interface AppsStore {
+  apps: Application[] | null
+  refresh(): Promise<void>
+  addApplication(app: Application): Promise<void>
+  updateApplication(app: Application): Promise<void>
+  logEvent(app: Application, type: ApplicationEvent['type'], detail?: string): Promise<void>
+  correctEvent(app: Application, index: number): Promise<void>
+  transitionTo(app: Application, status: Status, closedReason?: ClosedReason): Promise<string | null>
+  removeApplication(id: string): Promise<void>
+  importApps(incoming: Application[]): Promise<void>
+  replaceAll(next: Application[]): Promise<void>
+}
+
+const AppsContext = createContext<AppsStore | null>(null)
 
 export function RepoProvider({ repo, children }: { repo?: ApplicationRepo; children: React.ReactNode }) {
   const value = useMemo(() => repo ?? new LocalStorageRepo(), [repo])
-  return <RepoContext.Provider value={value}>{children}</RepoContext.Provider>
+  const store = useAppsStore(value)
+  return <AppsContext.Provider value={store}>{children}</AppsContext.Provider>
 }
 
-export function useApps() {
-  const repo = useContext(RepoContext)
-
+function useAppsStore(repo: ApplicationRepo): AppsStore {
   const [apps, setApps] = useState<Application[] | null>(null)
 
   const refresh = useCallback(async () => {
@@ -121,4 +133,10 @@ export function useApps() {
     importApps,
     replaceAll,
   }
+}
+
+export function useApps() {
+  const store = useContext(AppsContext)
+  if (!store) throw new Error('useApps must be used inside RepoProvider')
+  return store
 }

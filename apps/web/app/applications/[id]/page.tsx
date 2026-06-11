@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { useState } from 'react'
 import {
@@ -59,7 +60,13 @@ export default function Detail() {
       <div className="card facts">
         {app.closed_reason && <Fact label="closed" value={app.closed_reason} />}
         {app.needs_materials && (
-          <Fact label="materials" value="needed — the apply flow drafts these soon; ghosted2 CLI does it today" />
+          <Fact
+            label="materials"
+            value={<Link href={`/apply?id=${app.id}`} className="link">needed — open the apply workspace</Link>}
+          />
+        )}
+        {app.posting && !app.needs_materials && (
+          <Fact label="workspace" value={<Link href={`/apply?id=${app.id}`} className="link">open apply workspace</Link>} />
         )}
         {app.remind_at && <Fact label="remind" value={app.remind_at} />}
         {app.role_type && <Fact label="role type" value={app.role_type.replace('_', ' ')} />}

@@ -15,6 +15,8 @@ packages/core   # the entire product model — pure TS, zero deps, 44 tests
 apps/web        # Next.js (App Router) — thin UI over core (placeholder until M3)
 docs/           # the governing documents:
   GHOSTED_V2_PLAN.md     # build plan + milestones (the contract)
+  V3_LOCAL_AGENT_PLAN.md # local apply-agent slice + model-class decision
+  MODEL_CATALOG_AND_COSTS.md # model refresh, pricing, and generation telemetry
   DESIGN_DOC.md          # the why-it-feels-this-way doc
   DECISION_INTERVIEW.md  # all design decisions, answered, with rationale
   STARTING_BRIEF.md      # one-page synthesis — read this first

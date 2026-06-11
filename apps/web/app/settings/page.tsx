@@ -1,13 +1,19 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { describeAIAuth, parseV1Import, validateCVJson } from '@ghosted/core'
 import { useApps } from '../../lib/useApps'
 import { useBaseline } from '../../lib/useBaseline'
 import { useAIAuth } from '../../lib/useAIAuth'
 import { ConnectAI } from '../../components/ConnectAI'
 import { strings } from '../../lib/strings'
+
+type GenerationStats = {
+  runs: number
+  totalCost: number
+  byModel: { provider: string; model: string; runs: number; totalCost: number; averageCost: number; averageRating: number | null }[]
+}
 
 // Import/export keeps the local-first escape hatch. parseV1Import accepts
 // v1 (Go ghosted) and ghosted2 CLI JSON: `ghosted2 list --json` pipes in.
@@ -18,6 +24,14 @@ export default function Settings() {
   const [showConnect, setShowConnect] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [errors, setErrors] = useState<string[]>([])
+  const [generationStats, setGenerationStats] = useState<GenerationStats | null>(null)
+
+  useEffect(() => {
+    void fetch('/api/generate/stats')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { summary?: GenerationStats } | null) => setGenerationStats(data?.summary ?? null))
+      .catch(() => undefined)
+  }, [])
 
   const cvName =
     baseline?.cv_json && validateCVJson(baseline.cv_json).ok
@@ -84,7 +98,7 @@ export default function Settings() {
       </section>
 
       <section className="section">
-        <h2 className="section-title">AI connection</h2>
+        <h2 className="section-title">AI connection + model</h2>
         {auth && !showConnect ? (
           <>
             <p className="small">
@@ -108,7 +122,7 @@ export default function Settings() {
           </>
         ) : (
           <>
-            {!auth && <p className="small dim">Not connected — tracking works, document drafting stays off.</p>}
+            {!auth && <p className="small dim">Not connected — tracking works, document drafting stays off. Pick Codex CLI here if you want to use your Codex subscription locally.</p>}
             <ConnectAI
               current={auth ?? undefined}
               onConnect={async (a) => {
@@ -116,6 +130,30 @@ export default function Settings() {
                 setShowConnect(false)
               }}
             />
+          </>
+        )}
+      </section>
+
+      <section className="section">
+        <h2 className="section-title">Generation stats</h2>
+        {!generationStats || generationStats.runs === 0 ? (
+          <p className="small dim">No local generation runs yet. Once you draft materials, Ghosted tracks tokens, estimated cost, model, and later quality ratings.</p>
+        ) : (
+          <>
+            <p className="small">
+              <span className="mono">{generationStats.runs}</span> runs · est. <span className="mono">${generationStats.totalCost.toFixed(4)}</span>
+            </p>
+            <div className="stat-grid">
+              {generationStats.byModel.map((m) => (
+                <div className="card stat-block" key={`${m.provider}:${m.model}`}>
+                  <div className="stat-key">{m.provider} · {m.model}</div>
+                  <p className="small dim">
+                    {m.runs} runs · avg ${m.averageCost.toFixed(4)} · total ${m.totalCost.toFixed(4)}
+                    {m.averageRating !== null && ` · rating ${m.averageRating.toFixed(1)}/5`}
+                  </p>
+                </div>
+              ))}
+            </div>
           </>
         )}
       </section>
@@ -157,8 +195,7 @@ export default function Settings() {
       <section className="section">
         <h2 className="section-title">Data</h2>
         <p className="dim small">
-          Stored locally in this browser for now. Accounts + sync arrive with M2 (Supabase) — the storage layer is
-          already built for the swap.
+          Stored locally in this browser for now. Accounts + sync arrive later; v3 keeps the apply workflow local until the user-1 test passes.
         </p>
         <button
           className="btn-link danger"

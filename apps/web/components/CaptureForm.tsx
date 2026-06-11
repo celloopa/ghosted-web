@@ -170,7 +170,7 @@ export function CaptureForm({ onSubmit }: { onSubmit: (app: Application) => void
       )}
 
       <button type="submit" className="btn btn-primary">
-        Add application
+        {intent === 'generate' ? 'Continue to materials' : 'Add application'}
       </button>
     </form>
   )

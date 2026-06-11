@@ -28,8 +28,8 @@ export function Nav() {
             {t.label}
           </Link>
         ))}
-        <Link href="/applications/new" className="btn btn-primary nav-add">
-          {strings.addCta}
+        <Link href="/apply" className="btn btn-primary nav-add">
+          Apply
         </Link>
       </div>
     </nav>
