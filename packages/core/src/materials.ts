@@ -2,6 +2,50 @@
 // skills reordered by posting relevance. The agent's only jobs are the
 // summary line and the cover letter — see generate.ts.
 
+import type { Materials } from './types'
+
+export interface RewriteAcceptanceCounts {
+  accepted: number
+  edited: number
+  rejected: number
+  undecided: number
+  total: number
+}
+
+/**
+ * Derives rewrite acceptance counts from materials. Tolerates missing fields.
+ * "edited" counts as accepted AND edited (both flags set). Undecided = total - decided.
+ */
+export function rewriteAcceptance(materials: Materials | undefined | null): RewriteAcceptanceCounts {
+  const rewrites = materials?.resume_rewrites ?? []
+  const decisions = materials?.rewrite_decisions ?? {}
+  const total = rewrites.length
+
+  let accepted = 0
+  let edited = 0
+  let rejected = 0
+
+  for (let i = 0; i < total; i++) {
+    const d = decisions[i]
+    if (!d) continue
+    if (d.status === 'rejected') {
+      rejected += 1
+    } else if (d.status === 'accepted') {
+      accepted += 1
+      if (d.edited !== undefined) edited += 1
+    }
+  }
+
+  const decided = accepted + rejected
+  const undecided = total - decided
+  return { accepted, edited, rejected, undecided, total }
+}
+
+/** A draft is sendable when finalized_at is stamped. */
+export function isSendable(materials: Materials | undefined | null): boolean {
+  return typeof materials?.finalized_at === 'string' && materials.finalized_at.length > 0
+}
+
 export interface RankedBullet {
   text: string
   score: number

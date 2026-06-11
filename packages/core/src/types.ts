@@ -73,6 +73,10 @@ export interface Materials {
   generated_at?: string
   model?: string
   revisions?: number
+  /** Stamped when the user clicks "Materials done — applying". Presence = sendable. */
+  finalized_at?: string
+  /** revisions count captured at the moment of send. */
+  revisions_at_send?: number
 }
 
 export interface TransitionError {

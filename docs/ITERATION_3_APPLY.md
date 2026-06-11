@@ -130,3 +130,17 @@ landing page (weekend-2 items).
    This iteration is where "fits my aesthetic as a designer" gets enforced —
    your art direction, my implementation, review per screen.
 5. Nothing to install — Payload needs no Docker; Typst is already on the machine.
+
+## Decision: sendable is derived (2026-06-11)
+
+A draft does not earn a star rating. Star ratings ask the user to evaluate
+quality at the moment they are least motivated — immediately after finishing
+the materials. The data we care about comes from facts already present at
+send time.
+
+A draft becomes "sendable" at the moment the user clicks "Materials done —
+applying." At that point the code stamps two fields onto the existing
+materials: `finalized_at` (ISO timestamp) and `revisions_at_send` (the
+revision count at that instant). Quality is then derived per model: revisions
+before send, rewrite acceptance rate, and cost/duration from the local
+telemetry file — all computable without asking the user for anything.

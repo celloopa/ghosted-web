@@ -5,7 +5,10 @@ import {
   buildGenerationPrompt,
   parseGeneration,
   checkCoverLetter,
+  rewriteAcceptance,
+  isSendable,
   type GenerationInput,
+  type Materials,
 } from '../src/index'
 
 const CV = JSON.stringify({
@@ -147,5 +150,88 @@ describe('checkCoverLetter — code validates the agent, not vice versa', () => 
     const r = checkCoverLetter('Figma ships small teams. I built a design system at Asheville Dispensary.')
     expect(r.banned).toEqual([])
     expect(r.overLimit).toBe(false)
+  })
+})
+
+describe('rewriteAcceptance — derived from decisions, tolerates missing fields', () => {
+  it('returns all-zero counts for empty materials', () => {
+    const r = rewriteAcceptance(undefined)
+    expect(r).toEqual({ accepted: 0, edited: 0, rejected: 0, undecided: 0, total: 0 })
+  })
+
+  it('returns all-zero counts for materials with no rewrites', () => {
+    const m: Materials = { cover_letter: 'A letter.' }
+    expect(rewriteAcceptance(m)).toEqual({ accepted: 0, edited: 0, rejected: 0, undecided: 0, total: 0 })
+  })
+
+  it('counts undecided when decisions are missing', () => {
+    const m: Materials = {
+      resume_rewrites: [
+        { source: 'Built UI', rewrite: 'Built product UI', why: 'Matches' },
+        { source: 'Led team', rewrite: 'Led cross-functional team', why: 'Matches' },
+      ],
+    }
+    const r = rewriteAcceptance(m)
+    expect(r.total).toBe(2)
+    expect(r.undecided).toBe(2)
+    expect(r.accepted).toBe(0)
+    expect(r.rejected).toBe(0)
+  })
+
+  it('counts accepted, edited, rejected, and undecided correctly', () => {
+    const m: Materials = {
+      resume_rewrites: [
+        { source: 'A', rewrite: 'A2', why: 'w' },
+        { source: 'B', rewrite: 'B2', why: 'w' },
+        { source: 'C', rewrite: 'C2', why: 'w' },
+        { source: 'D', rewrite: 'D2', why: 'w' },
+      ],
+      rewrite_decisions: {
+        0: { status: 'accepted' },            // accepted, not edited
+        1: { status: 'accepted', edited: 'B-custom' }, // accepted + edited
+        2: { status: 'rejected' },
+        // index 3 is undecided
+      },
+    }
+    const r = rewriteAcceptance(m)
+    expect(r.total).toBe(4)
+    expect(r.accepted).toBe(2) // index 0 + 1
+    expect(r.edited).toBe(1)   // index 1 only
+    expect(r.rejected).toBe(1) // index 2
+    expect(r.undecided).toBe(1) // index 3
+  })
+
+  it('null materials returns zero counts', () => {
+    expect(rewriteAcceptance(null)).toEqual({ accepted: 0, edited: 0, rejected: 0, undecided: 0, total: 0 })
+  })
+
+  it('extra decision indexes beyond rewrite count are ignored in total', () => {
+    const m: Materials = {
+      resume_rewrites: [{ source: 'A', rewrite: 'A2', why: 'w' }],
+      rewrite_decisions: { 0: { status: 'accepted' }, 99: { status: 'rejected' } },
+    }
+    const r = rewriteAcceptance(m)
+    expect(r.total).toBe(1)
+    expect(r.accepted).toBe(1)
+  })
+})
+
+describe('isSendable — derived from finalized_at presence', () => {
+  it('returns false for undefined', () => {
+    expect(isSendable(undefined)).toBe(false)
+  })
+
+  it('returns false for null', () => {
+    expect(isSendable(null)).toBe(false)
+  })
+
+  it('returns false when finalized_at is absent', () => {
+    const m: Materials = { cover_letter: 'A letter.', revisions: 2 }
+    expect(isSendable(m)).toBe(false)
+  })
+
+  it('returns true when finalized_at is stamped', () => {
+    const m: Materials = { cover_letter: 'A letter.', finalized_at: '2026-06-11T15:00:00.000Z', revisions_at_send: 2 }
+    expect(isSendable(m)).toBe(true)
   })
 })

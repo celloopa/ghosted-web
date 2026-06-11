@@ -589,7 +589,17 @@ function Workspace({ app }: { app: Application }) {
         <button
           className="btn btn-primary"
           onClick={async () => {
-            await transitionTo({ ...app, needs_materials: undefined }, 'applied')
+            let base = { ...app, needs_materials: undefined }
+            if (app.materials) {
+              const stamped = {
+                ...app.materials,
+                finalized_at: new Date().toISOString(),
+                revisions_at_send: app.materials.revisions ?? 0,
+              }
+              await updateApplication({ ...base, materials: stamped })
+              base = { ...base, materials: stamped }
+            }
+            await transitionTo(base, 'applied')
             router.push('/')
           }}
         >
