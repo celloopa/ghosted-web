@@ -392,3 +392,19 @@ a {
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* ---- connect AI ---- */
+
+.connect-options {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.connect-option {
+  width: 100%;
+}
+
+.connect-rec {
+  margin-left: 8px;
+}

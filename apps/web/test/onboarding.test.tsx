@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { BaselineProvider } from '../lib/useBaseline'
 import { MemoryBaselineRepo } from '../lib/baselineRepo'
+import { AIAuthProvider } from '../lib/useAIAuth'
+import { MemoryAIAuthRepo } from '../lib/aiAuthRepo'
 import Onboarding from '../app/onboarding/page'
 
 vi.mock('next/navigation', () => ({
@@ -17,7 +19,9 @@ const VALID_CV = JSON.stringify({
 function setup(repo = new MemoryBaselineRepo()) {
   render(
     <BaselineProvider repo={repo}>
-      <Onboarding />
+      <AIAuthProvider repo={new MemoryAIAuthRepo()}>
+        <Onboarding />
+      </AIAuthProvider>
     </BaselineProvider>,
   )
   return repo
@@ -71,8 +75,13 @@ describe('baseline onboarding wizard', () => {
     expect((continueBtn as HTMLButtonElement).disabled).toBe(false)
     fireEvent.click(continueBtn)
 
+    // Connect AI step: skippable, never blocks the baseline
+    await screen.findByRole('heading', { name: 'Connect your AI' })
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+
     // Review: what the agent will know + enabled finish
     expect(await screen.findByText(/What the agent will know/)).toBeTruthy()
+    expect(screen.getByText(/not connected — tracking works/)).toBeTruthy()
     const finish = screen.getByRole('button', { name: 'Baseline ready' })
     expect((finish as HTMLButtonElement).disabled).toBe(false)
   })

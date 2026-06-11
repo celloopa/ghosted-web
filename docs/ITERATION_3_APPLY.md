@@ -86,9 +86,10 @@ Geist throughout, zero decoration that doesn't carry information.
    - Links: portfolio, GitHub, LinkedIn, Bluesky.
    - Hard constraints: location/remote, salary floor, visa, role types in/out.
    - Confirm `ats-job-docs/assets/resume-template.typ` as the PDF template.
-2. **Agent auth decision**: dev rides your existing `claude` CLI login (the
-   TS Agent SDK wraps Claude Code). For hosting later: provision an
-   ANTHROPIC_API_KEY with a spend cap. Confirm dev-on-CLI for now.
+2. ~~Agent auth decision~~ **Built into onboarding (Connect step + Settings):**
+   users pick Claude Code login (dev), a `claude setup-token` subscription
+   token, or an Anthropic/OpenAI API key. The agent route reads this
+   connection; iteration 3 moves stored keys server-side encrypted.
 3. **DB confirm**: Payload 3 embedded, SQLite locally, Postgres at deploy
    time. Veto if you want Postgres from day one.
 4. **Aesthetic direction**: bless the current warm-dark token set as the base

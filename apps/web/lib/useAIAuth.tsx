@@ -1,0 +1,39 @@
+'use client'
+
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import type { AIAuth } from '@ghosted/core'
+import { AIAuthRepo, LocalStorageAIAuthRepo } from './aiAuthRepo'
+
+const AIAuthContext = createContext<AIAuthRepo | null>(null)
+
+export function AIAuthProvider({ repo, children }: { repo?: AIAuthRepo; children: React.ReactNode }) {
+  const value = useMemo(() => repo ?? new LocalStorageAIAuthRepo(), [repo])
+  return <AIAuthContext.Provider value={value}>{children}</AIAuthContext.Provider>
+}
+
+export function useAIAuth() {
+  const repo = useContext(AIAuthContext)
+  if (!repo) throw new Error('useAIAuth must be used inside <AIAuthProvider>')
+
+  const [auth, setAuth] = useState<AIAuth | null | undefined>(undefined) // undefined = loading
+
+  useEffect(() => {
+    void repo.load().then((a) => setAuth(a))
+  }, [repo])
+
+  const connect = useCallback(
+    async (next: AIAuth) => {
+      const stamped = { ...next, added_at: new Date().toISOString() }
+      await repo.save(stamped)
+      setAuth(stamped)
+    },
+    [repo],
+  )
+
+  const disconnect = useCallback(async () => {
+    await repo.clear()
+    setAuth(null)
+  }, [repo])
+
+  return { auth, connect, disconnect }
+}

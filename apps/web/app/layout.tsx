@@ -3,6 +3,7 @@ import './globals.css'
 import { Nav } from '../components/Nav'
 import { RepoProvider } from '../lib/useApps'
 import { BaselineProvider } from '../lib/useBaseline'
+import { AIAuthProvider } from '../lib/useAIAuth'
 
 export const metadata: Metadata = {
   title: 'Ghosted — silence, measured.',
@@ -15,8 +16,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <RepoProvider>
           <BaselineProvider>
-            <Nav />
-            <main className="page">{children}</main>
+            <AIAuthProvider>
+              <Nav />
+              <main className="page">{children}</main>
+            </AIAuthProvider>
           </BaselineProvider>
         </RepoProvider>
       </body>

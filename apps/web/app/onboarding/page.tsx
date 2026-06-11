@@ -11,12 +11,15 @@ import {
   type RoleType,
 } from '@ghosted/core'
 import { useBaseline } from '../../lib/useBaseline'
+import { useAIAuth } from '../../lib/useAIAuth'
+import { ConnectAI } from '../../components/ConnectAI'
+import { describeAIAuth } from '@ghosted/core'
 
 // Baseline kit onboarding: one-time, ~10 minutes, draft-saved at every
 // step. The agent only ever writes from what's collected here — this flow
 // is where "never invent" gets its facts.
 
-const STEPS = ['CV', 'Voice', 'Links', 'Targeting', 'Review'] as const
+const STEPS = ['CV', 'Voice', 'Links', 'Targeting', 'Connect', 'Review'] as const
 
 const ROLE_CHIPS: { value: RoleType; label: string }[] = [
   { value: 'design_engineer', label: 'Design Engineer' },
@@ -33,6 +36,7 @@ const REMOTE_CHIPS: { value: RemotePreference; label: string }[] = [
 
 export default function Onboarding() {
   const { baseline, save } = useBaseline()
+  const { auth, connect } = useAIAuth()
   const router = useRouter()
   const [step, setStep] = useState(0)
   const [draft, setDraft] = useState<Baseline | null>(null)
@@ -252,6 +256,46 @@ export default function Onboarding() {
 
       {step === 4 && (
         <section className="section">
+          <h2 className="section-title">Connect your AI</h2>
+          <p className="dim small">
+            The apply flow drafts cover letters, resume adjustments, and answers with your own AI account.
+            Use your Claude subscription if you have one — an API key works too.
+          </p>
+          {auth ? (
+            <div className="card">
+              <p className="success">✓ {describeAIAuth(auth)}</p>
+              <div className="row gap">
+                <button className="btn btn-primary" onClick={() => setStep(5)}>
+                  Continue
+                </button>
+                <button className="btn" onClick={() => setStep(3)}>
+                  Back
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <ConnectAI
+                onConnect={async (a) => {
+                  await connect(a)
+                  setStep(5)
+                }}
+              />
+              <div className="row gap section">
+                <button className="btn" onClick={() => setStep(3)}>
+                  Back
+                </button>
+                <button className="btn" onClick={() => setStep(5)}>
+                  Skip for now
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
+      {step === 5 && (
+        <section className="section">
           <h2 className="section-title">What the agent will know</h2>
           <div className="card facts">
             <Recap label="facts" value={cvSummary ? `${cvSummary.name} — ${cvSummary.workCount} roles, ${cvSummary.skillCount} skills` : 'no CV'} />
@@ -261,12 +305,13 @@ export default function Onboarding() {
             {draft.constraints.salary_floor && <Recap label="floor" value={`$${draft.constraints.salary_floor.toLocaleString()}`} />}
             {draft.constraints.notes && <Recap label="must know" value={draft.constraints.notes} />}
             <Recap label="pdf template" value="ats-job-docs (single column, ATS-validated)" />
+            <Recap label="ai" value={auth ? describeAIAuth(auth) : 'not connected — tracking works, document drafting stays off'} />
           </div>
           <p className="dim small">
             And nothing beyond it: no invented roles, dates, metrics, or tools — ever.
           </p>
           <div className="row gap">
-            <button className="btn" onClick={() => setStep(3)}>
+            <button className="btn" onClick={() => setStep(4)}>
               Back
             </button>
             <button className="btn btn-primary" disabled={!baselineStatus(draft).ready} onClick={finish}>

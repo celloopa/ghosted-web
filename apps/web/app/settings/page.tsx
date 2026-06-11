@@ -2,9 +2,11 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import { parseV1Import, validateCVJson } from '@ghosted/core'
+import { describeAIAuth, parseV1Import, validateCVJson } from '@ghosted/core'
 import { useApps } from '../../lib/useApps'
 import { useBaseline } from '../../lib/useBaseline'
+import { useAIAuth } from '../../lib/useAIAuth'
+import { ConnectAI } from '../../components/ConnectAI'
 import { strings } from '../../lib/strings'
 
 // Import/export keeps the local-first escape hatch. parseV1Import accepts
@@ -12,6 +14,8 @@ import { strings } from '../../lib/strings'
 export default function Settings() {
   const { apps, importApps, replaceAll } = useApps()
   const { baseline, status, clear: clearBaseline } = useBaseline()
+  const { auth, connect, disconnect } = useAIAuth()
+  const [showConnect, setShowConnect] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [errors, setErrors] = useState<string[]>([])
 
@@ -77,6 +81,43 @@ export default function Settings() {
             </button>
           )}
         </div>
+      </section>
+
+      <section className="section">
+        <h2 className="section-title">AI connection</h2>
+        {auth && !showConnect ? (
+          <>
+            <p className="small">
+              <span className="success">✓ {describeAIAuth(auth)}</span>
+            </p>
+            <div className="row gap">
+              <button className="btn" onClick={() => setShowConnect(true)}>
+                Change
+              </button>
+              <button
+                className="btn-link danger"
+                onClick={async () => {
+                  if (confirm('Disconnect? Document drafting turns off until you reconnect.')) {
+                    await disconnect()
+                  }
+                }}
+              >
+                Disconnect
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            {!auth && <p className="small dim">Not connected — tracking works, document drafting stays off.</p>}
+            <ConnectAI
+              current={auth ?? undefined}
+              onConnect={async (a) => {
+                await connect(a)
+                setShowConnect(false)
+              }}
+            />
+          </>
+        )}
       </section>
 
       <section className="section">
