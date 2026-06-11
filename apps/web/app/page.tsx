@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import { isGhosted, needsFollowUp, type Application } from '@ghosted/core'
+import { isGhosted, needsFollowUp, reminderDue, type Application } from '@ghosted/core'
 import { useApps } from '../lib/useApps'
 import { useBaseline } from '../lib/useBaseline'
 import { strings } from '../lib/strings'
@@ -13,7 +13,7 @@ import { GhostBadge } from '../components/Badge'
 // Today: answer "what should I do right now?" in one glance, then get out
 // of the way. Follow-ups due → fresh ghosts → recent responses (quiet).
 export default function Today() {
-  const { apps, logEvent, importApps } = useApps()
+  const { apps, logEvent, importApps, updateApplication, transitionTo } = useApps()
   const { status: baselineReady } = useBaseline()
   const [justLogged, setJustLogged] = useState<string | null>(null)
   const today = todayISO()
@@ -21,6 +21,8 @@ export default function Today() {
   if (apps === null) return null
 
   const followUps = apps.filter((a) => needsFollowUp(a, today))
+  const reminders = apps.filter((a) => reminderDue(a, today))
+  const prep = apps.filter((a) => a.needs_materials && a.status === 'saved')
   const ghosts = apps.filter((a) => isGhosted(a, today) && !needsFollowUp(a, today))
   const recentResponses = apps.filter((a) =>
     a.events.some(
@@ -31,7 +33,7 @@ export default function Today() {
     ),
   )
 
-  const nothingToDo = followUps.length === 0 && ghosts.length === 0
+  const nothingToDo = followUps.length === 0 && ghosts.length === 0 && reminders.length === 0 && prep.length === 0
 
   return (
     <div>
@@ -81,6 +83,45 @@ export default function Today() {
                 }}
               >
                 Logged it
+              </button>
+            </TodayItem>
+          ))}
+        </section>
+      )}
+
+      {reminders.length > 0 && (
+        <section className="section">
+          <h2 className="section-title">You wanted to come back to these</h2>
+          {reminders.map((app) => (
+            <TodayItem key={app.id} app={app} today={today}>
+              <button className="btn btn-small" onClick={() => transitionTo(app, 'applied')}>
+                Applying now
+              </button>
+              <button
+                className="btn-link"
+                onClick={() => updateApplication({ ...app, remind_at: undefined })}
+              >
+                let it go
+              </button>
+            </TodayItem>
+          ))}
+        </section>
+      )}
+
+      {prep.length > 0 && (
+        <section className="section">
+          <h2 className="section-title">Materials to prepare</h2>
+          <p className="dim small">
+            Cover letter + resume adjustments before applying. The in-app apply flow is coming — meanwhile{' '}
+            <span className="mono">ghosted2 new &lt;url&gt;</span> drafts these today.
+          </p>
+          {prep.map((app) => (
+            <TodayItem key={app.id} app={app} today={today}>
+              <button
+                className="btn btn-small"
+                onClick={() => transitionTo({ ...app, needs_materials: undefined }, 'applied')}
+              >
+                Materials done — applying
               </button>
             </TodayItem>
           ))}

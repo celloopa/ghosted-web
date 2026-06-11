@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isGhosted, needsFollowUp } from '../src/index'
+import { isGhosted, needsFollowUp, reminderDue } from '../src/index'
 import { makeApp, ev } from './helpers'
 
 // Applied on Jan 1. Threshold 14 days → ghost line is Jan 15/16 boundary.
@@ -70,5 +70,24 @@ describe('needsFollowUp', () => {
     for (const status of ['saved', 'interviewing', 'offer', 'closed'] as const) {
       expect(needsFollowUp(makeApp({ status }), '2026-06-01')).toBe(false)
     }
+  })
+})
+
+describe('reminderDue ("remind me" capture intent)', () => {
+  const saved = { status: 'saved' as const, date_applied: undefined, events: [] }
+
+  it('fires on and after the remind date, not before', () => {
+    const app = makeApp({ ...saved, remind_at: '2026-06-10' })
+    expect(reminderDue(app, '2026-06-09')).toBe(false)
+    expect(reminderDue(app, '2026-06-10')).toBe(true)
+    expect(reminderDue(app, '2026-06-15')).toBe(true)
+  })
+
+  it('only applies to saved applications — applied ones use needsFollowUp', () => {
+    expect(reminderDue(makeApp({ status: 'applied', remind_at: '2026-06-01' }), '2026-06-11')).toBe(false)
+  })
+
+  it('no remind date, no reminder', () => {
+    expect(reminderDue(makeApp(saved), '2026-06-11')).toBe(false)
   })
 })

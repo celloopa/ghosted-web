@@ -39,6 +39,15 @@ export function useApps() {
     [repo, refresh],
   )
 
+  /** Full-object update (clear a reminder, mark materials ready, …). */
+  const updateApplication = useCallback(
+    async (app: Application) => {
+      await repo.upsert(app)
+      await refresh()
+    },
+    [repo, refresh],
+  )
+
   /** The core move: record a fact; derived states recompute themselves. */
   const logEvent = useCallback(
     async (app: Application, type: ApplicationEvent['type'], detail?: string) => {
@@ -104,6 +113,7 @@ export function useApps() {
     apps, // null while loading
     refresh,
     addApplication,
+    updateApplication,
     logEvent,
     correctEvent,
     transitionTo,

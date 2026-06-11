@@ -2,10 +2,21 @@
 
 import { useState } from 'react'
 import { deriveSource, type Application, type RoleType } from '@ghosted/core'
-import { todayISO } from '../lib/dates'
+import { plusDays, todayISO } from '../lib/dates'
 
 // Capture: thirty seconds, standing up. ≤7 fields visible; role_type is
 // required chips with examples (it powers the entire stats screen).
+// The intent fork: capturing facts is step one; what happens next is the
+// actual decision. Four explicit paths, none implied.
+type Intent = 'have' | 'generate' | 'later' | 'remind'
+
+const INTENTS: { id: Intent; label: string; detail: string }[] = [
+  { id: 'have', label: 'Applying now — I have my materials', detail: 'Marks it applied today and starts the response clock.' },
+  { id: 'generate', label: 'I need materials', detail: 'Saved and queued: cover letter + resume adjustments before applying.' },
+  { id: 'later', label: 'Just saving it', detail: 'Sits in Saved until you decide.' },
+  { id: 'remind', label: 'Remind me', detail: 'Saved — Today will nudge you on the date you pick.' },
+]
+
 const ROLE_CHIPS: { value: RoleType; label: string; examples: string }[] = [
   { value: 'design_engineer', label: 'Design Engineer', examples: 'design engineer, UX engineer, creative technologist' },
   { value: 'product_designer', label: 'Product Designer', examples: 'product, UX, interaction design' },
@@ -17,9 +28,10 @@ export function CaptureForm({ onSubmit }: { onSubmit: (app: Application) => void
   const [company, setCompany] = useState('')
   const [position, setPosition] = useState('')
   const [roleType, setRoleType] = useState<RoleType | null>(null)
-  const [applied, setApplied] = useState(true)
+  const [intent, setIntent] = useState<Intent | null>(null)
   const [jobUrl, setJobUrl] = useState('')
   const [dateApplied, setDateApplied] = useState(todayISO())
+  const [remindAt, setRemindAt] = useState(plusDays(3))
   const [resumeVersion, setResumeVersion] = useState('')
   const [showMore, setShowMore] = useState(false)
   const [notes, setNotes] = useState('')
@@ -30,16 +42,19 @@ export function CaptureForm({ onSubmit }: { onSubmit: (app: Application) => void
     if (!company.trim()) return setError('Company is required.')
     if (!position.trim()) return setError('Position is required.')
     if (!roleType) return setError('Pick a role type — it powers your stats.')
+    if (!intent) return setError('Pick what happens next.')
 
     const app: Application = {
       id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `app-${Date.now()}`,
       company: company.trim(),
       position: position.trim(),
       role_type: roleType,
-      status: applied ? 'applied' : 'saved',
-      events: applied ? [{ type: 'applied', date: dateApplied }] : [],
+      status: intent === 'have' ? 'applied' : 'saved',
+      events: intent === 'have' ? [{ type: 'applied', date: dateApplied }] : [],
     }
-    if (applied) app.date_applied = dateApplied
+    if (intent === 'have') app.date_applied = dateApplied
+    if (intent === 'generate') app.needs_materials = true
+    if (intent === 'remind') app.remind_at = remindAt
     if (jobUrl.trim()) {
       app.job_url = jobUrl.trim()
       const source = deriveSource(jobUrl.trim())
@@ -81,15 +96,26 @@ export function CaptureForm({ onSubmit }: { onSubmit: (app: Application) => void
       </div>
 
       <div className="field">
-        <span className="field-label">Status</span>
-        <div className="row gap">
-          <button type="button" className={`chip${applied ? ' chip-selected' : ''}`} onClick={() => setApplied(true)}>
-            Applied
-          </button>
-          <button type="button" className={`chip${!applied ? ' chip-selected' : ''}`} onClick={() => setApplied(false)}>
-            Just saving it
-          </button>
-          {applied && (
+        <span className="field-label">What happens next?</span>
+        <div className="connect-options">
+          {INTENTS.map((i) => (
+            <button
+              key={i.id}
+              type="button"
+              className={`chip connect-option${intent === i.id ? ' chip-selected' : ''}`}
+              onClick={() => {
+                setIntent(i.id)
+                setError(null)
+              }}
+            >
+              <span>{i.label}</span>
+              <span className="chip-examples">{i.detail}</span>
+            </button>
+          ))}
+        </div>
+        {intent === 'have' && (
+          <div className="row gap intent-extra">
+            <span className="dim small">Applied on</span>
             <input
               type="date"
               className="input input-date"
@@ -97,8 +123,20 @@ export function CaptureForm({ onSubmit }: { onSubmit: (app: Application) => void
               onChange={(e) => setDateApplied(e.target.value)}
               aria-label="Date applied"
             />
-          )}
-        </div>
+          </div>
+        )}
+        {intent === 'remind' && (
+          <div className="row gap intent-extra">
+            <span className="dim small">Nudge me on</span>
+            <input
+              type="date"
+              className="input input-date"
+              value={remindAt}
+              onChange={(e) => setRemindAt(e.target.value)}
+              aria-label="Remind date"
+            />
+          </div>
+        )}
       </div>
 
       <label className="field">

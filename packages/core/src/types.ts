@@ -35,6 +35,10 @@ export interface Application {
   resume_version?: string
   job_url?: string
   notes?: string
+  /** Saved-with-intent: cover letter / resume adjustments still to be made (apply-flow queue). */
+  needs_materials?: boolean
+  /** Saved-with-intent: Today nudges on this date. */
+  remind_at?: string
   events: ApplicationEvent[]
 }
 

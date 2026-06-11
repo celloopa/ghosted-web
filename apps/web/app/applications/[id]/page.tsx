@@ -58,6 +58,10 @@ export default function Detail() {
       {/* Facts — secondary to the timeline */}
       <div className="card facts">
         {app.closed_reason && <Fact label="closed" value={app.closed_reason} />}
+        {app.needs_materials && (
+          <Fact label="materials" value="needed — the apply flow drafts these soon; ghosted2 CLI does it today" />
+        )}
+        {app.remind_at && <Fact label="remind" value={app.remind_at} />}
         {app.role_type && <Fact label="role type" value={app.role_type.replace('_', ' ')} />}
         {app.source && <Fact label="source" value={app.source} />}
         {app.date_applied && <Fact label="applied" value={app.date_applied} />}

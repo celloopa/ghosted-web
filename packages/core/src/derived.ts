@@ -49,3 +49,11 @@ export function needsFollowUp(app: Application, today: string, cadenceDays = FOL
   if (last && daysBetween(last.date, today) < cadenceDays) return false
   return true
 }
+
+/**
+ * "Remind me" capture intent: a saved application whose remind date has
+ * arrived. Applied apps are covered by needsFollowUp instead.
+ */
+export function reminderDue(app: Application, today: string): boolean {
+  return app.status === 'saved' && !!app.remind_at && app.remind_at <= today
+}

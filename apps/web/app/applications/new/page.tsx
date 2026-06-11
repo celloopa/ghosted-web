@@ -14,7 +14,9 @@ export default function NewApplication() {
       <CaptureForm
         onSubmit={async (app) => {
           await addApplication(app)
-          router.push('/applications')
+          // Materials-needed lands on its detail page (the future apply
+          // workspace); everything else goes back to the list.
+          router.push(app.needs_materials ? `/applications/${app.id}` : '/applications')
         }}
       />
     </div>
