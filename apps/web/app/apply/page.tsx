@@ -2,11 +2,15 @@
 
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Suspense, useMemo, useState } from 'react'
+import { Suspense, useCallback, useMemo, useState } from 'react'
 import {
   analyzeFit,
   buildGenerationPrompt,
   checkCoverLetter,
+  checkDraftHonesty,
+  estimateCostUSD,
+  findCatalogEntry,
+  FALLBACK_MODEL_CATALOG,
   modelForAuth,
   parseGeneration,
   parsePostingHTML,
@@ -15,13 +19,18 @@ import {
   type Application,
   type FitReport,
   type GenerationInput,
+  type HonestyReport,
+  type Materials,
   type PostingFacts,
+  type RewriteDecision,
   type RoleType,
 } from '@ghosted/core'
 import { useApps } from '../../lib/useApps'
 import { useBaseline } from '../../lib/useBaseline'
 import { useAIAuth } from '../../lib/useAIAuth'
 import { ConnectAI } from '../../components/ConnectAI'
+import { RewritesPanel } from '../../components/RewritesPanel'
+import { StandoutsPanel } from '../../components/StandoutsPanel'
 import { todayISO } from '../../lib/dates'
 
 // The apply workspace. Minimum viable intelligence: everything on this page
@@ -337,7 +346,7 @@ function FitCard({ fit }: { fit: FitReport }) {
       <div className="row gap wrap" style={{ marginTop: 8 }}>
         {fit.matched.map((t) => (
           <span key={t} className="badge kw-matched">{t}</span>
-        ))}
+        ))}{' '}
         {fit.missing.map((t) => (
           <span key={t} className="badge kw-missing">{t}</span>
         ))}
@@ -376,6 +385,38 @@ function QuickEditChips({ onPick }: { onPick: (instruction: string) => void }) {
   )
 }
 
+// ---- Feature 2: cost estimate ----
+
+const ASSUMED_OUTPUT_TOKENS = 1500
+
+function formatTokenCount(n: number): string {
+  if (n >= 1000) return `${Math.round(n / 100) / 10}k`
+  return String(n)
+}
+
+function CostEstimate({ promptStr, auth }: { promptStr: string; auth: import('@ghosted/core').AIAuth | null | undefined }) {
+  const estimate = useMemo(() => {
+    if (!auth) return null
+    const inTokens = Math.ceil(promptStr.length / 4)
+    const totalTokens = inTokens + ASSUMED_OUTPUT_TOKENS
+    const isSubscription = auth.method === 'local_cli' || auth.provider === 'codex'
+    const model = modelForAuth(auth)
+    const entry = findCatalogEntry(FALLBACK_MODEL_CATALOG, auth.provider, model)
+    const costUSD = isSubscription ? null : estimateCostUSD(entry, promptStr.length, ASSUMED_OUTPUT_TOKENS)
+    const modelLabel = entry?.label ?? model
+    const costStr = costUSD === null ? 'subscription' : `~$${costUSD < 0.01 ? costUSD.toFixed(4) : costUSD.toFixed(2)}`
+    return { totalTokens, costStr, modelLabel }
+  }, [promptStr, auth])
+
+  if (!estimate) return null
+
+  return (
+    <span className="dim small mono cost-estimate">
+      {`≈ ${formatTokenCount(estimate.totalTokens)} tokens · ${estimate.costStr} on ${estimate.modelLabel}`}
+    </span>
+  )
+}
+
 // ---- Stage 3: the workspace ----
 
 function Workspace({ app }: { app: Application }) {
@@ -401,18 +442,34 @@ function Workspace({ app }: { app: Application }) {
 
   const letterCheck = app.materials?.cover_letter ? checkCoverLetter(app.materials.cover_letter) : null
 
-  function generationInput(): GenerationInput {
-    return {
-      company: app.company,
-      position: app.position,
-      descriptionExcerpt: posting.description.slice(0, 6000),
-      matched: posting.matched,
-      missing: posting.missing,
-      cvJson,
-      voiceSamples: (baseline?.voice_samples ?? []).map((v) => v.text),
-      ...(baseline?.constraints.notes ? { constraintNotes: baseline.constraints.notes } : {}),
-    }
-  }
+  const genInput: GenerationInput = useMemo(() => ({
+    company: app.company,
+    position: app.position,
+    descriptionExcerpt: posting.description.slice(0, 6000),
+    matched: posting.matched,
+    missing: posting.missing,
+    cvJson,
+    voiceSamples: (baseline?.voice_samples ?? []).map((v) => v.text),
+    ...(baseline?.constraints.notes ? { constraintNotes: baseline.constraints.notes } : {}),
+  }), [app.company, app.position, posting.description, posting.matched, posting.missing, cvJson, baseline?.voice_samples, baseline?.constraints.notes])
+
+  // Honesty report — deterministic, computed from the draft materials and the CV.
+  const honestyReport: HonestyReport = useMemo(() => checkDraftHonesty(
+    {
+      resume_rewrites: app.materials?.resume_rewrites ?? [],
+      opportunity_angles: app.materials?.opportunity_angles ?? [],
+      standout_suggestions: app.materials?.standout_suggestions ?? [],
+    },
+    cvJson,
+  ), [app.materials?.resume_rewrites, app.materials?.opportunity_angles, app.materials?.standout_suggestions, cvJson])
+
+  // Build the prompt string in a useMemo — reused for cost estimate and the actual call.
+  const promptStr = useMemo(() => {
+    const revision = instruction.trim() && app.materials?.cover_letter
+      ? { current: app.materials, instruction: instruction.trim() }
+      : undefined
+    return buildGenerationPrompt(genInput, revision)
+  }, [genInput, instruction, app.materials])
 
   async function callModel(prompt: string) {
     const res = await fetch('/api/generate', {
@@ -431,12 +488,12 @@ function Workspace({ app }: { app: Application }) {
     setGenError(null)
     setGenerating(true)
     try {
-      const input = generationInput()
       const revision =
         revisionInstruction && app.materials?.cover_letter
           ? { current: app.materials, instruction: revisionInstruction }
           : undefined
-      let result = await callModel(buildGenerationPrompt(input, revision))
+      const prompt = buildGenerationPrompt(genInput, revision)
+      let result = await callModel(prompt)
 
       // Deterministic validation; one automatic correction round, then we
       // show warnings rather than looping.
@@ -449,16 +506,18 @@ function Workspace({ app }: { app: Application }) {
           .filter(Boolean)
           .join('; ')
         result = await callModel(
-          buildGenerationPrompt(input, { current: result, instruction: `Validator flagged: ${fixes}.` }),
+          buildGenerationPrompt(genInput, { current: result, instruction: `Validator flagged: ${fixes}.` }),
         )
       }
 
-      const materials = {
+      const materials: Materials = {
         ...app.materials,
         summary: result.summary,
         cover_letter: result.cover_letter,
         resume_adjustments: renderResumeAdjustments(plan, { summary: result.summary, missing: posting.missing }),
         resume_rewrites: result.resume_rewrites,
+        // Clear stale decisions when rewrites are replaced.
+        rewrite_decisions: undefined,
         opportunity_angles: result.opportunity_angles,
         standout_suggestions: result.standout_suggestions,
         generated_at: new Date().toISOString(),
@@ -479,6 +538,40 @@ function Workspace({ app }: { app: Application }) {
     setCopied(label)
     setTimeout(() => setCopied(null), 1500)
   }
+
+  const handleDecide = useCallback(
+    async (index: number, decision: RewriteDecision | null) => {
+      const current = app.materials?.rewrite_decisions ?? {}
+      let next: Record<number, RewriteDecision> | undefined
+      if (decision === null) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { [index]: _, ...rest } = current as Record<number, RewriteDecision>
+        next = Object.keys(rest).length > 0 ? rest : undefined
+      } else {
+        next = { ...current, [index]: decision }
+      }
+      await updateApplication({ ...app, materials: { ...app.materials, rewrite_decisions: next } })
+    },
+    [app, updateApplication],
+  )
+
+  const handleCopyAccepted = useCallback(async () => {
+    const rewrites = app.materials?.resume_rewrites ?? []
+    const decisions = app.materials?.rewrite_decisions ?? {}
+    const lines = rewrites
+      .map((r, i) => {
+        const d = decisions[i]
+        if (d?.status !== 'accepted') return null
+        return `• ${d.edited ?? r.rewrite}`
+      })
+      .filter(Boolean)
+      .join('\n')
+    if (lines) {
+      await navigator.clipboard.writeText(lines)
+      setCopied('accepted-rewrites')
+      setTimeout(() => setCopied(null), 1500)
+    }
+  }, [app.materials?.resume_rewrites, app.materials?.rewrite_decisions])
 
   return (
     <div className="apply-flow">
@@ -536,9 +629,12 @@ function Workspace({ app }: { app: Application }) {
                   <h2 className="section-title">Editing mode</h2>
                   <p className="dim small">Start from AI suggestions, then ask for focused changes. You should not be writing from scratch.</p>
                 </div>
-                <button className="btn btn-primary" disabled={generating} onClick={() => generate()}>
-                  {generating ? 'Writing…' : app.materials?.cover_letter ? 'Regenerate all' : 'Generate materials'}
-                </button>
+                <div className="row gap" style={{ alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 }}>
+                  <CostEstimate promptStr={promptStr} auth={auth} />
+                  <button className="btn btn-primary" disabled={generating} onClick={() => generate()}>
+                    {generating ? 'Writing…' : app.materials?.cover_letter ? 'Regenerate all' : 'Generate materials'}
+                  </button>
+                </div>
               </div>
 
               {app.materials?.cover_letter && (
@@ -547,7 +643,7 @@ function Workspace({ app }: { app: Application }) {
                   <div className="row gap revision-row">
                     <input
                       className="input"
-                      placeholder="Focused edit — “make the standout ideas more visual”, “tighten resume rewrites”…"
+                      placeholder={'Focused edit — “make the standout ideas more visual”, “tighten resume rewrites”…'}
                       value={instruction}
                       onChange={(e) => setInstruction(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && instruction.trim() && generate(instruction.trim())}
@@ -559,6 +655,11 @@ function Workspace({ app }: { app: Application }) {
                 </>
               )}
               {genError && <p className="form-error" role="alert">{genError}</p>}
+              {app.materials?.cover_letter && honestyReport.flagged > 0 && (
+                <p className="dim small" data-testid="honesty-summary">
+                  {honestyReport.flagged} {honestyReport.flagged === 1 ? 'item needs' : 'items need'} your judgment — the model could not ground {honestyReport.flagged === 1 ? 'it' : 'them'} in your CV.
+                </p>
+              )}
 
               <div className="materials-grid">
                 <MaterialPanel title="Cover letter" kicker={app.materials?.cover_letter ? `${letterCheck?.words ?? 0} words` : 'not generated'}>
@@ -576,36 +677,40 @@ function Workspace({ app }: { app: Application }) {
                 </MaterialPanel>
 
                 <MaterialPanel title="Resume rewrites" kicker="AI rewording">
-                  {app.materials?.resume_rewrites?.length ? app.materials.resume_rewrites.map((r, i) => (
-                    <div className="suggestion-card" key={`${r.source}-${i}`}>
-                      <p className="mono dim small">from: {r.source}</p>
-                      <p>{r.rewrite}</p>
-                      <p className="dim small">{r.why}</p>
-                    </div>
-                  )) : <pre className="doc material-doc">{adjustments}</pre>}
-                  <button className="btn btn-small" onClick={() => copy('adjustments', adjustments)}>{copied === 'adjustments' ? 'copied' : 'copy computed plan'}</button>
+                  <RewritesPanel
+                    rewrites={app.materials?.resume_rewrites}
+                    decisions={app.materials?.rewrite_decisions}
+                    onDecide={handleDecide}
+                    onCopyAccepted={handleCopyAccepted}
+                    fallback={<pre className="doc material-doc">{adjustments}</pre>}
+                    checks={honestyReport.rewrites}
+                  />
+                  {!app.materials?.resume_rewrites?.length && (
+                    <button className="btn btn-small" onClick={() => copy('adjustments', adjustments)}>{copied === 'adjustments' ? 'copied' : 'copy computed plan'}</button>
+                  )}
                 </MaterialPanel>
 
                 <MaterialPanel title="Opportunity angles" kicker="where to lean in">
-                  {app.materials?.opportunity_angles?.length ? app.materials.opportunity_angles.map((angle, i) => (
-                    <div className="suggestion-card" key={`${angle.title}-${i}`}>
-                      <h3>{angle.title}</h3>
-                      <p>{angle.evidence}</p>
-                      <p className="dim small">Use: {angle.use}</p>
-                    </div>
-                  )) : <p className="dim small">Generate to see which parts of your background are most worth emphasizing.</p>}
+                  {app.materials?.opportunity_angles?.length ? app.materials.opportunity_angles.map((angle, i) => {
+                    const angleCheck = honestyReport.angles[i]
+                    return (
+                      <div className="suggestion-card" key={`${angle.title}-${i}`}>
+                        <h3>{angle.title}</h3>
+                        <p>{angle.evidence}</p>
+                        {angleCheck && !angleCheck.evidenceFound && (
+                          <span className="badge dim small" data-testid="badge-evidence-not-found">evidence not found in CV</span>
+                        )}
+                        <p className="dim small">Use: {angle.use}</p>
+                      </div>
+                    )
+                  }) : <p className="dim small">Generate to see which parts of your background are most worth emphasizing.</p>}
                 </MaterialPanel>
 
                 <MaterialPanel title="Standout moves" kicker="beyond docs">
-                  {app.materials?.standout_suggestions?.length ? app.materials.standout_suggestions.map((s, i) => (
-                    <div className="suggestion-card" key={`${s.title}-${i}`}>
-                      <div className="row spread gap">
-                        <h3>{s.title}</h3>
-                        <span className="badge kw-matched">{s.effort}</span>
-                      </div>
-                      <p>{s.action}</p>
-                    </div>
-                  )) : <p className="dim small">Generate to get practical follow-through ideas that are not just another cover letter paragraph.</p>}
+                  <StandoutsPanel
+                    standouts={app.materials?.standout_suggestions}
+                    spammyIndexes={honestyReport.spammyStandouts}
+                  />
                 </MaterialPanel>
               </div>
             </>

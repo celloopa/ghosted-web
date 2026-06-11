@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { execFile } from 'node:child_process'
 import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
+import { tmpdir, homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { modelForAuth, validateAIAuth, type AIAuth, type GenerationRunRecord } from '@ghosted/core'
 import { recordGenerationRun } from '../../../lib/server/generationTelemetry'
@@ -15,6 +15,29 @@ import { recordGenerationRun } from '../../../lib/server/generationTelemetry'
 export const maxDuration = 300
 
 const CLI_TIMEOUT_MS = 240_000
+
+function hardendedEnv(): NodeJS.ProcessEnv {
+  const extraPaths = [`${homedir()}/.local/bin`, '/opt/homebrew/bin', '/usr/local/bin'].join(':')
+  return {
+    ...process.env,
+    PATH: `${process.env.PATH ?? ''}:${extraPaths}`,
+  }
+}
+
+function cliErrorMessage(
+  prefix: string,
+  err: Error & { code?: string | number | null },
+  stdout: string,
+  stderr: string,
+): string {
+  if (err.code === 'ENOENT') {
+    const cliName = prefix.split(' ')[0]
+    return `${cliName} not found — set GHOSTED_${cliName.toUpperCase()}_BIN or install ${cliName}`
+  }
+  const exitSuffix = typeof err.code === 'number' ? ` (exit ${err.code})` : ''
+  const detail = stderr.trim() || stdout.slice(-300).trim() || err.message
+  return `${prefix}${exitSuffix}: ${detail.slice(0, 300)}`
+}
 
 interface GenerateBody {
   auth?: AIAuth
@@ -82,14 +105,16 @@ export async function POST(req: NextRequest) {
 function runClaudeCLI(prompt: string, model: string): Promise<string> {
   const bin = process.env.GHOSTED_CLAUDE_BIN ?? 'claude'
   return new Promise((resolve, reject) => {
+    // Strip any inherited API key so the claude CLI falls back to the machine's
+    // Claude Code subscription login — an env key silently overrides the profile.
+    const { ANTHROPIC_API_KEY: _k, ANTHROPIC_AUTH_TOKEN: _t, ...subscriptionEnv } = hardendedEnv()
     const child = execFile(
       bin,
       ['-p', '--model', model],
-      { timeout: CLI_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, env: process.env },
+      { timeout: CLI_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, env: subscriptionEnv },
       (err, stdout, stderr) => {
         if (err) {
-          const detail = stderr.trim() || err.message
-          reject(new Error(`claude CLI failed: ${detail.slice(0, 300)}`))
+          reject(new Error(cliErrorMessage('claude CLI failed', err, stdout, stderr)))
           return
         }
         resolve(stdout.trim())
@@ -108,11 +133,10 @@ async function runCodexCLI(prompt: string, model: string): Promise<string> {
       const child = execFile(
         bin,
         ['exec', '--ephemeral', '--sandbox', 'read-only', '--model', model, '-c', 'model_reasoning_effort="low"', '--output-last-message', outPath, '-'],
-        { timeout: CLI_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, env: process.env, cwd: process.cwd() },
-        (err, _stdout, stderr) => {
+        { timeout: CLI_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, env: hardendedEnv(), cwd: process.cwd() },
+        (err, stdout, stderr) => {
           if (err) {
-            const detail = stderr.trim() || err.message
-            reject(new Error(`codex CLI failed: ${detail.slice(0, 300)}`))
+            reject(new Error(cliErrorMessage('codex CLI failed', err, stdout, stderr)))
             return
           }
           resolve()

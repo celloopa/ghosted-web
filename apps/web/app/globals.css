@@ -770,3 +770,35 @@ a {
 
 .kw-matched { color: var(--state-success); background: var(--state-success-bg); margin: 2px; }
 .kw-missing { color: var(--text-muted); background: var(--bg-raised); margin: 2px; }
+
+/* ---- rewrite triage ---- */
+
+.rewrites-triage {}
+
+.rewrite-accepted {
+  background: color-mix(in srgb, var(--state-success-bg) 60%, var(--bg-surface));
+  border-left: 2px solid var(--state-success);
+  padding-left: 10px;
+  margin-left: -12px;
+}
+
+.rewrite-rejected {
+  opacity: 0.45;
+}
+
+.rewrite-edit-area {
+  margin-top: 6px;
+  resize: vertical;
+  font-size: 14px;
+}
+
+/* ---- cost estimate ---- */
+
+.cost-estimate {
+  white-space: nowrap;
+}
+
+.btn:disabled.btn-small {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

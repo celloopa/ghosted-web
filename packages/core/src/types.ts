@@ -56,11 +56,18 @@ export interface PostingRecord {
   analyzed_at: string
 }
 
+export interface RewriteDecision {
+  status: 'accepted' | 'rejected'
+  edited?: string
+}
+
 export interface Materials {
   summary?: string
   cover_letter?: string
   resume_adjustments?: string
   resume_rewrites?: { source: string; rewrite: string; why: string }[]
+  /** Triage decisions keyed by rewrite index. Optional; JSON-serializable for localStorage + export. */
+  rewrite_decisions?: Record<number, RewriteDecision>
   opportunity_angles?: { title: string; evidence: string; use: string }[]
   standout_suggestions?: { title: string; action: string; effort: 'low' | 'medium' | 'high' }[]
   generated_at?: string

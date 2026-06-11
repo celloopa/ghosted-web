@@ -163,6 +163,26 @@ export function calculateUsageCost(usage: UsageParts, pricing?: ModelPricing): U
   }
 }
 
+/**
+ * Estimate USD cost for a generation given prompt char count and assumed output tokens.
+ * Uses ceil(promptChars / 4) for input tokens.
+ * Returns null when the provider is a subscription CLI (codex local_cli / claude local_cli)
+ * where per-call pricing does not apply.
+ */
+export function estimateCostUSD(
+  entry: ModelCatalogEntry | undefined,
+  promptChars: number,
+  assumedOutputTokens = 1500,
+): number | null {
+  if (!entry || !entry.pricing) return null
+  // Subscription-billed entries (codex provider, or source === 'estimated' with no real pricing)
+  // are flagged by having no meaningful per-token price — treat as subscription.
+  if (entry.provider === 'codex') return null
+  const inTokens = Math.ceil(promptChars / 4)
+  const cost = calculateUsageCost({ input: inTokens, output: assumedOutputTokens }, entry.pricing)
+  return cost.total
+}
+
 export function estimateTextGenerationCost(entry: ModelCatalogEntry, promptChars: number, expectedOutputChars: number): { usage: UsageParts; cost: UsageCost } {
   const usage = { input: approxTokensForText('x'.repeat(Math.max(0, promptChars))), output: approxTokensForText('x'.repeat(Math.max(0, expectedOutputChars))) }
   return { usage, cost: calculateUsageCost(usage, entry.pricing) }
