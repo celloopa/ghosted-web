@@ -802,3 +802,120 @@ a {
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* ---- apply motion (Feature 2) ------------------------------------------ */
+/* Calm is the brand: fade-up for stagger, settle-in for the finale moment.  */
+/* No bounces, no springs. One earned ~450ms max on the confirm card.        */
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes settle-in {
+  0%   { opacity: 0; transform: translateY(4px) scale(0.99); }
+  60%  { opacity: 1; transform: translateY(0)   scale(1.005); }
+  100% { opacity: 1; transform: translateY(0)   scale(1); }
+}
+
+.reveal   { animation: fade-up var(--motion-move) ease-out both; }
+.reveal-2 { animation: fade-up var(--motion-move) ease-out 60ms  both; }
+.reveal-3 { animation: fade-up var(--motion-move) ease-out 120ms both; }
+.reveal-4 { animation: fade-up var(--motion-move) ease-out 180ms both; }
+
+.settle { animation: settle-in 420ms ease-out both; }
+
+.btn:active { transform: scale(0.985); transition: transform var(--motion-fast); }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal, .reveal-2, .reveal-3, .reveal-4,
+  [class*='settle'] { animation: none; }
+  .btn:active { transform: none; }
+}
+
+/* ---- finale stage ---- */
+
+.finale-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.finale-title {
+  font-size: 22px;
+  font-weight: 650;
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.finale-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.finale-doc-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  padding: 16px;
+}
+
+.finale-doc-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.finale-doc-name {
+  font-family: var(--font-data);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.finale-doc-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.finale-section {
+  margin-top: 20px;
+}
+
+.finale-notes {
+  width: 100%;
+  min-height: 80px;
+  margin-top: 8px;
+  resize: vertical;
+}
+
+.finale-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.applied-confirm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  background: var(--state-success-bg);
+  border: 1px solid color-mix(in srgb, var(--state-success) 40%, transparent);
+  color: var(--state-success);
+  font-weight: 500;
+}
+
+@media (max-width: 700px) {
+  .finale-cards { grid-template-columns: 1fr; }
+  .finale-actions { flex-direction: column; align-items: stretch; }
+}

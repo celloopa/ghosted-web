@@ -32,6 +32,7 @@ import { ConnectAI } from '../../components/ConnectAI'
 import { RewritesPanel } from '../../components/RewritesPanel'
 import { StandoutsPanel } from '../../components/StandoutsPanel'
 import { todayISO } from '../../lib/dates'
+import { buildDownloadName, defaultView, type WorkspaceView } from '../../lib/applyHelpers'
 
 // The apply workspace. Minimum viable intelligence: everything on this page
 // is deterministic — fetch, parse, keywords, fit, bullet order, validation —
@@ -417,6 +418,293 @@ function CostEstimate({ promptStr, auth }: { promptStr: string; auth: import('@g
   )
 }
 
+// ---- Finale: document cards with download ----
+
+function downloadBlob(content: string, filename: string) {
+  const blob = new Blob([content], { type: 'text/markdown' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function FinaleDocCard({
+  name,
+  content,
+  warnings,
+  className,
+  onCopy,
+  copied,
+}: {
+  name: string
+  content: string
+  warnings?: React.ReactNode
+  className?: string
+  onCopy: () => void
+  copied: boolean
+}) {
+  return (
+    <div className={`finale-doc-card${className ? ` ${className}` : ''}`}>
+      <div className="finale-doc-head">
+        <span className="finale-doc-name">{name}</span>
+        <div className="finale-doc-actions">
+          <button className="btn btn-small" onClick={onCopy}>
+            {copied ? 'copied' : 'copy'}
+          </button>
+          <button className="btn btn-small" onClick={() => downloadBlob(content, name)}>
+            download
+          </button>
+        </div>
+      </div>
+      {warnings}
+      <pre className="doc material-doc">{content}</pre>
+    </div>
+  )
+}
+
+// ---- Finale stage ----
+
+function Finale({
+  app,
+  onSwitchToWorkspace,
+}: {
+  app: Application
+  onSwitchToWorkspace: () => void
+}) {
+  const { updateApplication, transitionTo } = useApps()
+  const { baseline } = useBaseline()
+  const { auth } = useAIAuth()
+  const router = useRouter()
+
+  const posting = app.posting!
+  const materials = app.materials!
+
+  const cvJson = baseline?.cv_json ?? ''
+  const plan = useMemo(() => planResume(cvJson, posting.matched), [cvJson, posting.matched])
+
+  const letterCheck = checkCoverLetter(materials.cover_letter ?? '')
+
+  const coverLetterContent = materials.cover_letter ?? ''
+  const resumeAdjContent = materials.resume_adjustments ?? renderResumeAdjustments(plan, { summary: materials.summary, missing: posting.missing })
+
+  const coverLetterName = buildDownloadName(app.company, 'cover-letter')
+  const resumeAdjName = buildDownloadName(app.company, 'resume-adjustments')
+
+  // Generation prompt for revisions — same path as workspace
+  const genInput: GenerationInput = useMemo(() => ({
+    company: app.company,
+    position: app.position,
+    descriptionExcerpt: posting.description.slice(0, 6000),
+    matched: posting.matched,
+    missing: posting.missing,
+    cvJson,
+    voiceSamples: (baseline?.voice_samples ?? []).map((v) => v.text),
+    ...(baseline?.constraints.notes ? { constraintNotes: baseline.constraints.notes } : {}),
+  }), [app.company, app.position, posting.description, posting.matched, posting.missing, cvJson, baseline?.voice_samples, baseline?.constraints.notes])
+
+  const [instruction, setInstruction] = useState('')
+  const [generating, setGenerating] = useState(false)
+  const [genError, setGenError] = useState<string | null>(null)
+  const [copiedKey, setCopiedKey] = useState<string | null>(null)
+  const [notes, setNotes] = useState(app.notes ?? '')
+  const [confirmed, setConfirmed] = useState(false)
+
+  function copy(key: string, text: string) {
+    void navigator.clipboard.writeText(text)
+    setCopiedKey(key)
+    setTimeout(() => setCopiedKey(null), 1500)
+  }
+
+  async function callModel(prompt: string) {
+    const res = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ auth, prompt, applicationId: app.id, task: 'revision' }),
+    })
+    const data = (await res.json()) as { text?: string; model?: string; error?: string }
+    if (!res.ok || !data.text) throw new Error(data.error ?? 'generation failed')
+    const parsed = parseGeneration(data.text)
+    if (!parsed.ok) throw new Error(parsed.error)
+    return parsed
+  }
+
+  async function generate(revisionInstruction?: string) {
+    setGenError(null)
+    setGenerating(true)
+    try {
+      const revision = revisionInstruction && materials.cover_letter
+        ? { current: materials, instruction: revisionInstruction }
+        : undefined
+      const prompt = buildGenerationPrompt(genInput, revision)
+      let result = await callModel(prompt)
+
+      const check = checkCoverLetter(result.cover_letter)
+      if (check.overLimit || check.banned.length > 0) {
+        const fixes = [
+          check.overLimit ? `the letter is ${check.words} words — cut it under ${180}` : '',
+          check.banned.length > 0 ? `it uses banned phrasing: ${check.banned.join('; ')} — remove` : '',
+        ].filter(Boolean).join('; ')
+        result = await callModel(
+          buildGenerationPrompt(genInput, { current: result, instruction: `Validator flagged: ${fixes}.` }),
+        )
+      }
+
+      const updated: Materials = {
+        ...materials,
+        summary: result.summary,
+        cover_letter: result.cover_letter,
+        resume_adjustments: renderResumeAdjustments(plan, { summary: result.summary, missing: posting.missing }),
+        resume_rewrites: result.resume_rewrites,
+        rewrite_decisions: undefined,
+        opportunity_angles: result.opportunity_angles,
+        standout_suggestions: result.standout_suggestions,
+        generated_at: new Date().toISOString(),
+        model: auth ? modelForAuth(auth) : undefined,
+        revisions: (materials.revisions ?? 0) + (revisionInstruction ? 1 : 0),
+      }
+      await updateApplication({ ...app, materials: updated })
+      setInstruction('')
+    } catch (e) {
+      setGenError(e instanceof Error ? e.message : 'generation failed')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  async function saveNotes() {
+    await updateApplication({ ...app, notes })
+  }
+
+  async function finalize() {
+    let base = { ...app, needs_materials: undefined }
+    if (app.materials) {
+      const stamped: Materials = {
+        ...app.materials,
+        finalized_at: new Date().toISOString(),
+        revisions_at_send: app.materials.revisions ?? 0,
+      }
+      await updateApplication({ ...base, materials: stamped })
+      base = { ...base, materials: stamped }
+    }
+    await transitionTo(base, 'applied')
+    setConfirmed(true)
+    // Brief confirmation moment (~600ms total), then route to the detail page.
+    setTimeout(() => {
+      router.push(`/applications/${app.id}`)
+    }, 620)
+  }
+
+  // Key the animation on generated_at so a regenerate re-staggerers the cards.
+  const animKey = materials.generated_at ?? 'initial'
+
+  const fitBadge = posting.fit_score >= 70
+    ? <span className="badge kw-matched">{posting.fit_score}/100</span>
+    : <span className="badge kw-missing">{posting.fit_score}/100</span>
+
+  if (confirmed) {
+    return (
+      <div className="apply-flow">
+        <ApplyFlowChrome step="materials" company={app.company} position={app.position} status="Applied" />
+        <div className="applied-confirm settle" role="status">
+          Applied. Opening the application…
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="apply-flow">
+      <ApplyFlowChrome
+        step="materials"
+        company={app.company}
+        position={app.position}
+        status={generating ? 'Revising' : 'Materials ready'}
+      />
+
+      <div className="finale-header reveal">
+        <h2 className="finale-title">{app.company} — materials ready</h2>
+        {fitBadge}
+      </div>
+
+      {generating && (
+        <LoadingPanel title="Revising materials" detail="Applying your instruction and refreshing the documents." />
+      )}
+      {genError && <p className="form-error" role="alert">{genError}</p>}
+
+      <div className="finale-cards" key={animKey}>
+        <FinaleDocCard
+          name={coverLetterName}
+          content={coverLetterContent}
+          className="reveal"
+          onCopy={() => copy('letter', coverLetterContent)}
+          copied={copiedKey === 'letter'}
+          warnings={
+            (letterCheck.banned.length > 0 || letterCheck.overLimit) ? (
+              <div className="row gap wrap" style={{ marginBottom: 8 }}>
+                {letterCheck.banned.map((b) => (
+                  <span key={b} className="badge kw-missing">banned: {b}</span>
+                ))}
+                {letterCheck.overLimit && (
+                  <span className="badge kw-missing">over {180} words ({letterCheck.words})</span>
+                )}
+              </div>
+            ) : undefined
+          }
+        />
+        <FinaleDocCard
+          name={resumeAdjName}
+          content={resumeAdjContent}
+          className="reveal-2"
+          onCopy={() => copy('adj', resumeAdjContent)}
+          copied={copiedKey === 'adj'}
+        />
+      </div>
+
+      <div className="finale-section reveal-3">
+        <h3 className="section-title">Anything to adjust?</h3>
+        <QuickEditChips onPick={(chip) => generate(chip)} />
+        <div className="row gap revision-row" style={{ marginTop: 8 }}>
+          <input
+            className="input"
+            placeholder='Focused edit — "sharpen the opening", "lead with motion work"…'
+            value={instruction}
+            onChange={(e) => setInstruction(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && instruction.trim() && generate(instruction.trim())}
+          />
+          <button className="btn" disabled={generating || !instruction.trim()} onClick={() => generate(instruction.trim())}>
+            Revise
+          </button>
+        </div>
+      </div>
+
+      <div className="finale-section reveal-4">
+        <h3 className="section-title">Notes to self</h3>
+        <textarea
+          className="input finale-notes"
+          placeholder="Anything you want to remember — the hiring manager's name, a question to ask, a concern to address…"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          onBlur={() => void saveNotes()}
+        />
+      </div>
+
+      <div className="finale-actions reveal-4">
+        <button className="btn btn-primary btn-progress" disabled={generating} onClick={() => void finalize()}>
+          Done — mark applied
+        </button>
+        <button className="btn" onClick={onSwitchToWorkspace}>
+          Full workspace
+        </button>
+        <Link href={`/applications/${app.id}`} className="btn-link">
+          Details
+        </Link>
+      </div>
+    </div>
+  )
+}
+
 // ---- Stage 3: the workspace ----
 
 function Workspace({ app }: { app: Application }) {
@@ -424,6 +712,14 @@ function Workspace({ app }: { app: Application }) {
   const { baseline } = useBaseline()
   const { auth, connect } = useAIAuth()
   const router = useRouter()
+
+  // Default to finale when materials exist, otherwise workspace.
+  const [view, setView] = useState<WorkspaceView>(() => defaultView(app))
+
+  // Keep the view state in sync when app data updates (e.g. after generate).
+  // If we're in workspace and materials just arrived, stay in workspace so the
+  // user sees the result — let them switch to finale manually or via the
+  // generate() success path below.
 
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
@@ -526,6 +822,8 @@ function Workspace({ app }: { app: Application }) {
       }
       await updateApplication({ ...app, materials })
       setInstruction('')
+      // Advance to finale on successful generation.
+      setView('finale')
     } catch (e) {
       setGenError(e instanceof Error ? e.message : 'generation failed')
     } finally {
@@ -573,6 +871,12 @@ function Workspace({ app }: { app: Application }) {
     }
   }, [app.materials?.resume_rewrites, app.materials?.rewrite_decisions])
 
+  // The Finale view is rendered inside Workspace so both share the same
+  // app reference (which updates after generate()).
+  if (view === 'finale' && app.materials?.cover_letter) {
+    return <Finale app={app} onSwitchToWorkspace={() => setView('workspace')} />
+  }
+
   return (
     <div className="apply-flow">
       <ApplyFlowChrome
@@ -583,9 +887,16 @@ function Workspace({ app }: { app: Application }) {
       />
 
       <div className="row spread wrap apply-actions motion-in">
-        <Link href={`/applications/${app.id}`} className="btn">
-          Details
-        </Link>
+        <div className="row gap">
+          <Link href={`/applications/${app.id}`} className="btn">
+            Details
+          </Link>
+          {app.materials?.cover_letter && (
+            <button className="btn" onClick={() => setView('finale')}>
+              Finale
+            </button>
+          )}
+        </div>
         <button
           className="btn btn-primary"
           onClick={async () => {
@@ -653,7 +964,7 @@ function Workspace({ app }: { app: Application }) {
                   <div className="row gap revision-row">
                     <input
                       className="input"
-                      placeholder={'Focused edit — “make the standout ideas more visual”, “tighten resume rewrites”…'}
+                      placeholder={'Focused edit — "make the standout ideas more visual", "tighten resume rewrites"…'}
                       value={instruction}
                       onChange={(e) => setInstruction(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && instruction.trim() && generate(instruction.trim())}

@@ -9,9 +9,11 @@ import {
   type ApplicationEvent,
   type ClosedReason,
   type Status,
+  type Application,
 } from '@ghosted/core'
 import { useApps } from '../../../lib/useApps'
 import { FollowUpBadge, GhostBadge, StatusBadge } from '../../../components/Badge'
+import { EditApplicationForm } from '../../../components/EditApplicationForm'
 import { todayISO } from '../../../lib/dates'
 import { strings } from '../../../lib/strings'
 
@@ -26,10 +28,11 @@ const EVENT_LABELS: Record<ApplicationEvent['type'], string> = {
 export default function Detail() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
-  const { apps, logEvent, correctEvent, transitionTo, removeApplication } = useApps()
+  const { apps, logEvent, correctEvent, transitionTo, removeApplication, updateApplication } = useApps()
   const [closing, setClosing] = useState(false)
   const [noteDraft, setNoteDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [editing, setEditing] = useState(false)
   const today = todayISO()
 
   if (apps === null) return null
@@ -41,6 +44,11 @@ export default function Detail() {
   const forward: Status[] = (
     { saved: ['applied'], applied: ['interviewing', 'offer'], interviewing: ['offer'], offer: [], closed: [] } as Record<Status, Status[]>
   )[app.status]
+
+  async function handleSave(updated: Application) {
+    await updateApplication(updated)
+    setEditing(false)
+  }
 
   return (
     <div className="narrow">
@@ -57,30 +65,44 @@ export default function Detail() {
       </div>
 
       {/* Facts — secondary to the timeline */}
-      <div className="card facts">
-        {app.closed_reason && <Fact label="closed" value={app.closed_reason} />}
-        {app.needs_materials && (
-          <Fact
-            label="materials"
-            value={<Link href={`/apply?id=${app.id}`} className="link">needed — open the apply workspace</Link>}
+      {editing ? (
+        <div className="card">
+          <EditApplicationForm
+            app={app}
+            onSave={handleSave}
+            onCancel={() => setEditing(false)}
           />
-        )}
-        {app.posting && !app.needs_materials && (
-          <Fact label="workspace" value={<Link href={`/apply?id=${app.id}`} className="link">open apply workspace</Link>} />
-        )}
-        {app.remind_at && <Fact label="remind" value={app.remind_at} />}
-        {app.role_type && <Fact label="role type" value={app.role_type.replace('_', ' ')} />}
-        {app.source && <Fact label="source" value={app.source} />}
-        {app.date_applied && <Fact label="applied" value={app.date_applied} />}
-        {app.resume_version && <Fact label="resume" value={app.resume_version} />}
-        {(app.salary_min || app.salary_max) && (
-          <Fact label="salary" value={[app.salary_min, app.salary_max].filter(Boolean).map((n) => `$${n!.toLocaleString()}`).join(' – ')} />
-        )}
-        {app.job_url && (
-          <Fact label="url" value={<a href={app.job_url} target="_blank" rel="noreferrer" className="link">{new URL(app.job_url).hostname}</a>} />
-        )}
-        {app.notes && <Fact label="notes" value={app.notes} />}
-      </div>
+        </div>
+      ) : (
+        <div className="card facts">
+          <div className="row spread">
+            <span />
+            <button className="btn btn-small" onClick={() => setEditing(true)}>Edit</button>
+          </div>
+          {app.closed_reason && <Fact label="closed" value={app.closed_reason} />}
+          {app.needs_materials && (
+            <Fact
+              label="materials"
+              value={<Link href={`/apply?id=${app.id}`} className="link">needed — open the apply workspace</Link>}
+            />
+          )}
+          {app.posting && !app.needs_materials && (
+            <Fact label="workspace" value={<Link href={`/apply?id=${app.id}`} className="link">open apply workspace</Link>} />
+          )}
+          {app.remind_at && <Fact label="remind" value={app.remind_at} />}
+          {app.role_type && <Fact label="role type" value={app.role_type.replace('_', ' ')} />}
+          {app.source && <Fact label="source" value={app.source} />}
+          {app.date_applied && <Fact label="applied" value={app.date_applied} />}
+          {app.resume_version && <Fact label="resume" value={app.resume_version} />}
+          {(app.salary_min || app.salary_max) && (
+            <Fact label="salary" value={[app.salary_min, app.salary_max].filter(Boolean).map((n) => `$${n!.toLocaleString()}`).join(' – ')} />
+          )}
+          {app.job_url && (
+            <Fact label="url" value={<a href={app.job_url} target="_blank" rel="noreferrer" className="link">{new URL(app.job_url).hostname}</a>} />
+          )}
+          {app.notes && <Fact label="notes" value={app.notes} />}
+        </div>
+      )}
 
       {/* Log an event — the user states facts; judgments compute themselves */}
       <div className="row gap wrap">
