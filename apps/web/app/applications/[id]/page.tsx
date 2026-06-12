@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   isGhosted,
   needsFollowUp,
@@ -16,6 +16,7 @@ import { FollowUpBadge, GhostBadge, StatusBadge } from '../../../components/Badg
 import { EditApplicationForm } from '../../../components/EditApplicationForm'
 import { todayISO } from '../../../lib/dates'
 import { strings } from '../../../lib/strings'
+import { buildDownloadName, isContentNewerThanExport } from '../../../lib/applyHelpers'
 
 const EVENT_LABELS: Record<ApplicationEvent['type'], string> = {
   applied: 'Applied',
@@ -24,6 +25,156 @@ const EVENT_LABELS: Record<ApplicationEvent['type'], string> = {
   follow_up: 'Followed up',
   note: 'Note',
 }
+
+// ── Relative-time helper ──────────────────────────────────────────────────────
+
+function relativeDate(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime()
+  const days = Math.floor(diff / 86_400_000)
+  if (days === 0) return 'today'
+  if (days === 1) return 'yesterday'
+  if (days < 7) return `${days} days ago`
+  if (days < 30) return `${Math.floor(days / 7)} weeks ago`
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function shortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+// ── Inline-blob download helpers ──────────────────────────────────────────────
+
+function downloadBlob(content: string, filename: string) {
+  const blob = new Blob([content], { type: 'text/markdown' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+// ── Exported-file record from GET /api/export ─────────────────────────────────
+
+interface ExportedFile {
+  name: string
+  size: number
+  mtime: string
+}
+
+// ── Documents section ─────────────────────────────────────────────────────────
+
+function DocumentsSection({ app }: { app: Application }) {
+  const materials = app.materials!
+  const [copied, setCopied] = useState<string | null>(null)
+  const [pdfFiles, setPdfFiles] = useState<ExportedFile[]>([])
+
+  // Fetch existing PDFs from server on mount
+  useEffect(() => {
+    void fetch(`/api/export?appId=${encodeURIComponent(app.id)}`)
+      .then((r) => r.json())
+      .then((d: { files?: ExportedFile[] }) => {
+        if (Array.isArray(d.files)) setPdfFiles(d.files)
+      })
+      .catch(() => undefined)
+  }, [app.id])
+
+  function copy(key: string, text: string) {
+    void navigator.clipboard.writeText(text)
+    setCopied(key)
+    setTimeout(() => setCopied(null), 1500)
+  }
+
+  const coverLetterName = buildDownloadName(app.company, 'cover-letter')
+  const resumeAdjName = buildDownloadName(app.company, 'resume-adjustments')
+
+  const companySlugged = app.company.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'company'
+
+  // Staleness: content changed since last export
+  const stale = isContentNewerThanExport(materials)
+
+  const generatedAt = materials.generated_at ? relativeDate(materials.generated_at) : 'unknown'
+  const exportedAt = materials.exported_at ? shortDate(materials.exported_at) : 'not yet'
+
+  return (
+    <section className="section">
+      <div className="card reveal">
+        <h2 className="section-title">Documents</h2>
+        <p className="dim small mono" style={{ margin: '0 0 14px' }}>
+          generated {generatedAt}
+          {materials.model ? ` · model ${materials.model}` : ''}
+          {' · '}exported {exportedAt}
+        </p>
+
+        {stale && (
+          <p className="dim small" style={{ margin: '0 0 12px' }}>
+            content changed since the last PDF export
+          </p>
+        )}
+
+        {/* Markdown grab actions */}
+        <div className="row gap wrap" style={{ marginBottom: 14 }}>
+          {materials.cover_letter && (
+            <>
+              <button
+                className="btn btn-small"
+                onClick={() => copy('letter', materials.cover_letter!)}
+              >
+                {copied === 'letter' ? 'copied' : 'copy'} {coverLetterName}
+              </button>
+              <button
+                className="btn btn-small"
+                onClick={() => downloadBlob(materials.cover_letter!, coverLetterName)}
+              >
+                ↓ {coverLetterName}
+              </button>
+            </>
+          )}
+          {materials.resume_adjustments && (
+            <>
+              <button
+                className="btn btn-small"
+                onClick={() => copy('adj', materials.resume_adjustments!)}
+              >
+                {copied === 'adj' ? 'copied' : 'copy'} {resumeAdjName}
+              </button>
+              <button
+                className="btn btn-small"
+                onClick={() => downloadBlob(materials.resume_adjustments!, resumeAdjName)}
+              >
+                ↓ {resumeAdjName}
+              </button>
+            </>
+          )}
+          {/* PDF download links */}
+          {pdfFiles.map((f) => {
+            const friendlyName = f.name === 'resume.pdf'
+              ? `${companySlugged}-resume.pdf`
+              : `${companySlugged}-cover-letter.pdf`
+            const href = `/api/export/file?appId=${encodeURIComponent(app.id)}&name=${encodeURIComponent(f.name)}&dl=${encodeURIComponent(friendlyName)}`
+            return (
+              <a key={f.name} href={href} className="btn btn-small" download={friendlyName}>
+                ↓ {f.name}
+              </a>
+            )
+          })}
+        </div>
+
+        {/* Re-entry CTA */}
+        <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 12 }}>
+          <Link href={`/apply?id=${app.id}`} className="btn">
+            Open materials workspace
+          </Link>
+          <p className="dim small" style={{ margin: '6px 0 0' }}>
+            revise content · change style · re-export
+          </p>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ── Main detail page ──────────────────────────────────────────────────────────
 
 export default function Detail() {
   const { id } = useParams<{ id: string }>()
@@ -80,12 +231,12 @@ export default function Detail() {
             <button className="btn btn-small" onClick={() => setEditing(true)}>Edit</button>
           </div>
           {app.closed_reason && <Fact label="closed" value={app.closed_reason} />}
-          {(app.posting || app.materials) && (
+          {app.needs_materials && (
             <Fact
               label="workspace"
               value={
                 <Link href={`/apply?id=${app.id}`} className="link">
-                  {app.needs_materials ? 'needed — open the apply workspace' : 'review materials'}
+                  needed — open the apply workspace
                 </Link>
               }
             />
@@ -104,6 +255,9 @@ export default function Detail() {
           {app.notes && <Fact label="notes" value={app.notes} />}
         </div>
       )}
+
+      {/* Documents section — shown whenever materials exist */}
+      {app.materials && <DocumentsSection app={app} />}
 
       {/* Log an event — the user states facts; judgments compute themselves */}
       <div className="row gap wrap">

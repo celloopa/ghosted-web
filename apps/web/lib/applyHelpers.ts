@@ -79,6 +79,27 @@ export function isStaleExport(
 }
 
 /**
+ * Whether the materials content is newer than the last PDF export.
+ * Used on the detail page to show a staleness warning.
+ *
+ * Returns true when:
+ *  - materials.generated_at is set AND
+ *  - either exported_at is absent (never exported), OR generated_at > exported_at
+ *
+ * Returns false when:
+ *  - materials is undefined/null
+ *  - generated_at is absent (nothing generated yet, nothing to be stale)
+ *  - exported_at >= generated_at (export is current)
+ */
+export function isContentNewerThanExport(materials: import('@ghosted/core').Materials | undefined | null): boolean {
+  if (!materials) return false
+  const { generated_at, exported_at } = materials
+  if (!generated_at) return false
+  if (!exported_at) return false
+  return generated_at > exported_at
+}
+
+/**
  * Derive which finale actions to show based on app.status.
  * Returns a plain object so it can be tested without DOM.
  */

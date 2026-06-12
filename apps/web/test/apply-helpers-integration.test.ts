@@ -1,11 +1,12 @@
 /**
  * Tests for the new pure helpers added to applyHelpers.ts:
- *   buildExportPayload — payload-builder with bulletOrder mapping
- *   isStaleExport      — stale-export hint logic
- *   finaleActions      — visibility of finale actions by status
+ *   buildExportPayload       — payload-builder with bulletOrder mapping
+ *   isStaleExport            — stale-export hint logic
+ *   finaleActions            — visibility of finale actions by status
+ *   isContentNewerThanExport — staleness rule for the detail-page Documents section
  */
 import { describe, it, expect } from 'vitest'
-import { buildExportPayload, isStaleExport, finaleActions } from '../lib/applyHelpers'
+import { buildExportPayload, isStaleExport, finaleActions, isContentNewerThanExport } from '../lib/applyHelpers'
 import type { Application } from '@ghosted/core'
 import type { ResumePlan } from '@ghosted/core'
 
@@ -154,6 +155,58 @@ describe('isStaleExport', () => {
 
   it('returns false when generatedAt is before exportedAt (re-exported after revise)', () => {
     expect(isStaleExport('2026-06-11T12:00:00Z', '2026-06-11T10:00:00Z')).toBe(false)
+  })
+})
+
+// ── isContentNewerThanExport ──────────────────────────────────────────────────
+
+describe('isContentNewerThanExport', () => {
+  it('returns false when materials is undefined', () => {
+    expect(isContentNewerThanExport(undefined)).toBe(false)
+  })
+
+  it('returns false when materials is null', () => {
+    expect(isContentNewerThanExport(null)).toBe(false)
+  })
+
+  it('returns false when generated_at is absent (nothing generated yet)', () => {
+    expect(isContentNewerThanExport({ cover_letter: 'Hello.' })).toBe(false)
+  })
+
+  it('returns false when exported_at is absent and generated_at is set (never exported)', () => {
+    // exported_at missing → we cannot say content is stale relative to an export that never happened
+    expect(isContentNewerThanExport({ generated_at: '2026-06-11T10:00:00Z' })).toBe(false)
+  })
+
+  it('returns true when generated_at is after exported_at', () => {
+    expect(isContentNewerThanExport({
+      generated_at: '2026-06-11T12:00:00Z',
+      exported_at: '2026-06-11T10:00:00Z',
+    })).toBe(true)
+  })
+
+  it('returns false when generated_at equals exported_at', () => {
+    expect(isContentNewerThanExport({
+      generated_at: '2026-06-11T10:00:00Z',
+      exported_at: '2026-06-11T10:00:00Z',
+    })).toBe(false)
+  })
+
+  it('returns false when exported_at is after generated_at (export is current)', () => {
+    expect(isContentNewerThanExport({
+      generated_at: '2026-06-11T10:00:00Z',
+      exported_at: '2026-06-11T12:00:00Z',
+    })).toBe(false)
+  })
+
+  it('ignores unrelated materials fields — only generated_at and exported_at matter', () => {
+    expect(isContentNewerThanExport({
+      cover_letter: 'Hello.',
+      summary: 'A summary.',
+      revisions: 5,
+      generated_at: '2026-06-11T11:00:00Z',
+      exported_at: '2026-06-11T09:00:00Z',
+    })).toBe(true)
   })
 })
 

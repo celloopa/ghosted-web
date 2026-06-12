@@ -1,6 +1,8 @@
+import { stat, readdir } from 'node:fs/promises'
 import { NextRequest, NextResponse } from 'next/server'
 import { buildResumeModel, buildExpectations, normalizeDocStyle } from '@ghosted/core'
 import { runExport } from '../../../lib/server/typstExport'
+import { resolveExportDir } from '../../../lib/server/resolveExportFile'
 
 // Keep the connection alive long enough for two typst compiles + ATS runs.
 export const maxDuration = 120
@@ -103,5 +105,51 @@ export async function POST(req: NextRequest) {
     const message = err instanceof Error ? err.message : 'export failed'
     console.error(JSON.stringify({ kind: 'export_error', appId: body.appId, ms: Date.now() - started, message }))
     return NextResponse.json({ error: message }, { status: 502 })
+  }
+}
+
+// ── GET /api/export?appId=<id> ────────────────────────────────────────────────
+// Returns { files: [{ name, size, mtime }] } for PDFs that exist in the export dir.
+// Missing dir → { files: [] }. Invalid appId → 400.
+
+export async function GET(req: NextRequest) {
+  const appId = req.nextUrl.searchParams.get('appId')
+
+  if (!appId) {
+    return NextResponse.json({ error: 'missing appId' }, { status: 400 })
+  }
+  if (!APP_ID_RE.test(appId)) {
+    return NextResponse.json({ error: 'appId must match [a-zA-Z0-9-]' }, { status: 400 })
+  }
+
+  let exportDir: string
+  try {
+    exportDir = resolveExportDir(appId)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'invalid request'
+    return NextResponse.json({ error: message }, { status: 400 })
+  }
+
+  const ALLOWED = new Set(['resume.pdf', 'cover-letter.pdf'])
+
+  try {
+    const entries = await readdir(exportDir)
+    const files: { name: string; size: number; mtime: string }[] = []
+    for (const entry of entries) {
+      if (!ALLOWED.has(entry)) continue
+      try {
+        const s = await stat(`${exportDir}/${entry}`)
+        files.push({ name: entry, size: s.size, mtime: s.mtime.toISOString() })
+      } catch {
+        // file disappeared between readdir and stat — skip
+      }
+    }
+    return NextResponse.json({ files })
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === 'ENOENT') {
+      return NextResponse.json({ files: [] })
+    }
+    return NextResponse.json({ error: 'could not read export directory' }, { status: 500 })
   }
 }

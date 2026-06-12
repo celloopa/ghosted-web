@@ -665,7 +665,12 @@ function Finale({
       const data = (await res.json()) as ExportResult & { error?: string }
       if (!res.ok || !data.resume) throw new Error(data.error ?? 'export failed')
       setExportResult(data)
-      setExportedAt(new Date().toISOString())
+      const exportedAt = new Date().toISOString()
+      setExportedAt(exportedAt)
+      // Stamp exported_at onto materials so the detail page can detect staleness.
+      if (app.materials) {
+        await updateApplication({ ...app, materials: { ...app.materials, exported_at: exportedAt } })
+      }
     } catch (e) {
       setExportError(e instanceof Error ? e.message : 'export failed')
     } finally {

@@ -77,6 +77,8 @@ export interface Materials {
   finalized_at?: string
   /** revisions count captured at the moment of send. */
   revisions_at_send?: number
+  /** Stamped after a successful PDF export. Used to detect content-changed-since-export. */
+  exported_at?: string
 }
 
 export interface TransitionError {
