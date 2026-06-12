@@ -29,10 +29,12 @@ import { useApps } from '../../lib/useApps'
 import { useBaseline } from '../../lib/useBaseline'
 import { useAIAuth } from '../../lib/useAIAuth'
 import { ConnectAI } from '../../components/ConnectAI'
+import { ModelPicker } from '../../components/ModelPicker'
 import { RewritesPanel } from '../../components/RewritesPanel'
 import { StandoutsPanel } from '../../components/StandoutsPanel'
 import { todayISO } from '../../lib/dates'
-import { buildDownloadName, defaultView, type WorkspaceView } from '../../lib/applyHelpers'
+import { buildDownloadName, buildExportPayload, defaultView, finaleActions, isStaleExport, type WorkspaceView } from '../../lib/applyHelpers'
+import { useModelChoice } from '../../lib/useModelChoice'
 
 // The apply workspace. Minimum viable intelligence: everything on this page
 // is deterministic — fetch, parse, keywords, fit, bullet order, validation —
@@ -466,6 +468,57 @@ function FinaleDocCard({
 
 // ---- Finale stage ----
 
+interface ExportAts {
+  pass: boolean
+  report: string
+}
+
+interface ExportResult {
+  resume: { pdfBase64: string; ats: ExportAts }
+  cover: { pdfBase64: string; ats: ExportAts }
+}
+
+function downloadPdf(base64: string, filename: string) {
+  const byteChars = atob(base64)
+  const bytes = new Uint8Array(byteChars.length)
+  for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i)
+  const blob = new Blob([bytes], { type: 'application/pdf' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function ExportResultCard({
+  label,
+  filename,
+  result,
+}: {
+  label: string
+  filename: string
+  result: { pdfBase64: string; ats: ExportAts }
+}) {
+  return (
+    <div className="export-result-card">
+      <div className="export-result-head">
+        <span className="finale-doc-name">{label}</span>
+        <button className="btn btn-small" onClick={() => downloadPdf(result.pdfBase64, filename)}>
+          Download PDF
+        </button>
+      </div>
+      <p className={`small export-ats-status${result.ats.pass ? ' export-ats-pass' : ' export-ats-fail'}`}>
+        {result.ats.pass ? 'ATS check passed' : 'ATS check found problems'}
+      </p>
+      <details>
+        <summary className="dim small" style={{ cursor: 'pointer', marginTop: 4 }}>validator report</summary>
+        <pre className="doc mono small export-ats-report">{result.ats.report}</pre>
+      </details>
+    </div>
+  )
+}
+
 function Finale({
   app,
   onSwitchToWorkspace,
@@ -476,6 +529,7 @@ function Finale({
   const { updateApplication, transitionTo } = useApps()
   const { baseline } = useBaseline()
   const { auth } = useAIAuth()
+  const { model: chosenModel } = useModelChoice()
   const router = useRouter()
 
   const posting = app.posting!
@@ -511,6 +565,15 @@ function Finale({
   const [notes, setNotes] = useState(app.notes ?? '')
   const [confirmed, setConfirmed] = useState(false)
 
+  // Export state
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
+  const [exportResult, setExportResult] = useState<ExportResult | null>(null)
+  const [exportedAt, setExportedAt] = useState<string | undefined>(undefined)
+  const staleExport = isStaleExport(exportedAt, materials.generated_at)
+
+  const actions = finaleActions(app.status)
+
   function copy(key: string, text: string) {
     void navigator.clipboard.writeText(text)
     setCopiedKey(key)
@@ -521,7 +584,7 @@ function Finale({
     const res = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ auth, prompt, applicationId: app.id, task: 'revision' }),
+      body: JSON.stringify({ auth, prompt, applicationId: app.id, task: 'revision', ...(chosenModel ? { model: chosenModel } : {}) }),
     })
     const data = (await res.json()) as { text?: string; model?: string; error?: string }
     if (!res.ok || !data.text) throw new Error(data.error ?? 'generation failed')
@@ -573,6 +636,28 @@ function Finale({
     }
   }
 
+  async function exportPdfs() {
+    if (!cvJson) return
+    setExportError(null)
+    setExporting(true)
+    try {
+      const payload = buildExportPayload(app, cvJson, plan)
+      const res = await fetch('/api/export', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = (await res.json()) as ExportResult & { error?: string }
+      if (!res.ok || !data.resume) throw new Error(data.error ?? 'export failed')
+      setExportResult(data)
+      setExportedAt(new Date().toISOString())
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : 'export failed')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   async function saveNotes() {
     await updateApplication({ ...app, notes })
   }
@@ -613,6 +698,9 @@ function Finale({
       </div>
     )
   }
+
+  const resumePdfName = `${app.company.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'company'}-resume.pdf`
+  const coverPdfName = `${app.company.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'company'}-cover-letter.pdf`
 
   return (
     <div className="apply-flow">
@@ -662,6 +750,46 @@ function Finale({
         />
       </div>
 
+      {/* Export block */}
+      <div className="finale-section export-block reveal-3">
+        <h3 className="section-title">Export</h3>
+        {!cvJson ? (
+          <p className="dim small export-no-cv">PDF export needs a CV — add your CV in onboarding first.</p>
+        ) : (
+          <>
+            <div className="row gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                className="btn btn-progress"
+                disabled={exporting}
+                onClick={() => void exportPdfs()}
+              >
+                {exporting ? 'Rendering…' : 'Export PDFs (Typst)'}
+              </button>
+              {staleExport && !exporting && (
+                <span className="dim small" data-testid="stale-export-hint">
+                  letter changed since last export — re-export for fresh PDFs
+                </span>
+              )}
+            </div>
+            {exportError && <p className="form-error" role="alert" style={{ marginTop: 8 }}>{exportError}</p>}
+            {exportResult && (
+              <div className="export-results" data-testid="export-results">
+                <ExportResultCard
+                  label="resume.pdf"
+                  filename={resumePdfName}
+                  result={exportResult.resume}
+                />
+                <ExportResultCard
+                  label="cover-letter.pdf"
+                  filename={coverPdfName}
+                  result={exportResult.cover}
+                />
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
       <div className="finale-section reveal-3">
         <h3 className="section-title">Anything to adjust?</h3>
         <QuickEditChips onPick={(chip) => generate(chip)} />
@@ -676,6 +804,9 @@ function Finale({
           <button className="btn" disabled={generating || !instruction.trim()} onClick={() => generate(instruction.trim())}>
             Revise
           </button>
+          <div className="model-picker-inline">
+            <ModelPicker />
+          </div>
         </div>
       </div>
 
@@ -691,15 +822,24 @@ function Finale({
       </div>
 
       <div className="finale-actions reveal-4">
-        <button className="btn btn-primary btn-progress" disabled={generating} onClick={() => void finalize()}>
-          Done — mark applied
-        </button>
+        {actions.showMarkApplied && (
+          <button className="btn btn-primary btn-progress" disabled={generating} onClick={() => void finalize()}>
+            Done — mark applied
+          </button>
+        )}
+        {actions.showBackToDetails && (
+          <Link href={`/applications/${app.id}`} className="btn">
+            Back to details
+          </Link>
+        )}
         <button className="btn" onClick={onSwitchToWorkspace}>
           Full workspace
         </button>
-        <Link href={`/applications/${app.id}`} className="btn-link">
-          Details
-        </Link>
+        {actions.showMarkApplied && (
+          <Link href={`/applications/${app.id}`} className="btn-link">
+            Details
+          </Link>
+        )}
       </div>
     </div>
   )
@@ -711,6 +851,7 @@ function Workspace({ app }: { app: Application }) {
   const { updateApplication, transitionTo } = useApps()
   const { baseline } = useBaseline()
   const { auth, connect } = useAIAuth()
+  const { model: chosenModel } = useModelChoice()
   const router = useRouter()
 
   // Default to finale when materials exist, otherwise workspace.
@@ -771,7 +912,7 @@ function Workspace({ app }: { app: Application }) {
     const res = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ auth, prompt, applicationId: app.id, task: app.materials?.cover_letter ? 'revision' : 'cover_letter' }),
+      body: JSON.stringify({ auth, prompt, applicationId: app.id, task: app.materials?.cover_letter ? 'revision' : 'cover_letter', ...(chosenModel ? { model: chosenModel } : {}) }),
     })
     const data = (await res.json()) as { text?: string; model?: string; error?: string }
     if (!res.ok || !data.text) throw new Error(data.error ?? 'generation failed')
@@ -952,6 +1093,9 @@ function Workspace({ app }: { app: Application }) {
                 </div>
                 <div className="row gap" style={{ alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 }}>
                   <CostEstimate promptStr={promptStr} auth={auth} />
+                  <div className="model-picker-inline">
+                    <ModelPicker />
+                  </div>
                   <button className="btn btn-primary" disabled={generating} onClick={() => generate()}>
                     {generating ? 'Writing…' : app.materials?.cover_letter ? 'Regenerate all' : 'Generate materials'}
                   </button>

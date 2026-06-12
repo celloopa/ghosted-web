@@ -80,14 +80,15 @@ export default function Detail() {
             <button className="btn btn-small" onClick={() => setEditing(true)}>Edit</button>
           </div>
           {app.closed_reason && <Fact label="closed" value={app.closed_reason} />}
-          {app.needs_materials && (
+          {(app.posting || app.materials) && (
             <Fact
-              label="materials"
-              value={<Link href={`/apply?id=${app.id}`} className="link">needed — open the apply workspace</Link>}
+              label="workspace"
+              value={
+                <Link href={`/apply?id=${app.id}`} className="link">
+                  {app.needs_materials ? 'needed — open the apply workspace' : 'review materials'}
+                </Link>
+              }
             />
-          )}
-          {app.posting && !app.needs_materials && (
-            <Fact label="workspace" value={<Link href={`/apply?id=${app.id}`} className="link">open apply workspace</Link>} />
           )}
           {app.remind_at && <Fact label="remind" value={app.remind_at} />}
           {app.role_type && <Fact label="role type" value={app.role_type.replace('_', ' ')} />}

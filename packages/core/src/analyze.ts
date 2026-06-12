@@ -88,6 +88,26 @@ const LEXICON: LexiconEntry[] = [
   { term: 'CMS', aliases: ['cms', 'contentful', 'sanity', 'payload'] },
 ]
 
+/**
+ * Given a canonical term from the LEXICON, return the first alias (in the
+ * entry's alias order) that appears in `text` using the same word-boundary
+ * matching as countMatches. Returns null when the term is not in the lexicon
+ * or no alias matches.
+ *
+ * The LEXICON itself remains private; this is the only intended escape hatch
+ * for callers that need to resolve the surface form actually present in a
+ * document rather than the canonical display label.
+ */
+export function keywordVariantIn(text: string, term: string): string | null {
+  const entry = LEXICON.find((e) => e.term === term)
+  if (!entry) return null
+  const lower = text.toLowerCase()
+  for (const alias of entry.aliases) {
+    if (countMatches(lower, alias) > 0) return alias
+  }
+  return null
+}
+
 export interface Keyword {
   term: string
   count: number

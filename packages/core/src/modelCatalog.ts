@@ -252,6 +252,32 @@ export function normalizeOpenRouterModel(model: OpenRouterModelLike, now = new D
   }
 }
 
+export interface RunnableOpts {
+  claudeCli: boolean
+  codexCli: boolean
+  anthropicKey: boolean
+  openaiKey: boolean
+}
+
+/**
+ * Returns true when the entry can be used given the currently available runners.
+ * - anthropic provider: usable if the Claude CLI is available OR an Anthropic API key is present
+ * - openai provider: usable if an OpenAI API key is present
+ * - codex provider: usable if the Codex CLI is available
+ */
+export function runnableWith(entry: ModelCatalogEntry, opts: RunnableOpts): boolean {
+  switch (entry.provider) {
+    case 'anthropic':
+      return opts.claudeCli || opts.anthropicKey
+    case 'openai':
+      return opts.openaiKey
+    case 'codex':
+      return opts.codexCli
+    default:
+      return false
+  }
+}
+
 export function mergeModelCatalog(base: ModelCatalogEntry[], incoming: ModelCatalogEntry[]): ModelCatalogEntry[] {
   const map = new Map<string, ModelCatalogEntry>()
   for (const entry of base) map.set(`${entry.provider}:${entry.id}`, entry)

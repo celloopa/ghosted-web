@@ -7,8 +7,10 @@ import {
   findCatalogEntry,
   mergeModelCatalog,
   normalizeOpenRouterModel,
+  runnableWith,
   summarizeGenerationRuns,
   type GenerationRunRecord,
+  type ModelCatalogEntry,
 } from '../src/index'
 
 describe('model catalog pricing', () => {
@@ -117,5 +119,42 @@ describe('generation run summaries', () => {
     expect(summary.runs).toBe(2)
     expect(summary.totalCost).toBeCloseTo(0.06)
     expect(summary.byModel[0]?.averageRating).toBe(3)
+  })
+})
+
+describe('runnableWith', () => {
+  const anthropicEntry: ModelCatalogEntry = findCatalogEntry(FALLBACK_MODEL_CATALOG, 'anthropic', 'claude-sonnet-4-6')!
+  const openaiEntry: ModelCatalogEntry = findCatalogEntry(FALLBACK_MODEL_CATALOG, 'openai', 'gpt-5-mini')!
+  const codexEntry: ModelCatalogEntry = findCatalogEntry(FALLBACK_MODEL_CATALOG, 'codex', 'gpt-5-mini')!
+
+  const none = { claudeCli: false, codexCli: false, anthropicKey: false, openaiKey: false }
+  const all = { claudeCli: true, codexCli: true, anthropicKey: true, openaiKey: true }
+
+  it('anthropic model is runnable when claude CLI is available', () => {
+    expect(runnableWith(anthropicEntry, { ...none, claudeCli: true })).toBe(true)
+  })
+
+  it('anthropic model is runnable when anthropic api key is present', () => {
+    expect(runnableWith(anthropicEntry, { ...none, anthropicKey: true })).toBe(true)
+  })
+
+  it('anthropic model is NOT runnable when only codex CLI and openai key are present', () => {
+    expect(runnableWith(anthropicEntry, { ...none, codexCli: true, openaiKey: true })).toBe(false)
+  })
+
+  it('openai model requires openai api key — claude CLI alone is not enough', () => {
+    expect(runnableWith(openaiEntry, { ...none, claudeCli: true })).toBe(false)
+    expect(runnableWith(openaiEntry, { ...none, openaiKey: true })).toBe(true)
+  })
+
+  it('codex model requires codex CLI — api key alone is not enough', () => {
+    expect(runnableWith(codexEntry, { ...none, openaiKey: true })).toBe(false)
+    expect(runnableWith(codexEntry, { ...none, codexCli: true })).toBe(true)
+  })
+
+  it('all entries are runnable when everything is available', () => {
+    for (const entry of FALLBACK_MODEL_CATALOG) {
+      expect(runnableWith(entry, all)).toBe(true)
+    }
   })
 })

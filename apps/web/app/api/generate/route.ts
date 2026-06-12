@@ -4,8 +4,9 @@ import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir, homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { modelForAuth, validateAIAuth, type AIAuth, type GenerationRunRecord } from '@ghosted/core'
+import { FALLBACK_MODEL_CATALOG, findCatalogEntry, modelForAuth, validateAIAuth, type AIAuth, type GenerationRunRecord } from '@ghosted/core'
 import { recordGenerationRun } from '../../../lib/server/generationTelemetry'
+import { resolveRunner } from '../../../lib/server/resolveRunner'
 
 // Runs the ONE bounded generation prompt through whichever local connection
 // the user picked. Local-only today: credentials arrive with the request from
@@ -42,6 +43,8 @@ function cliErrorMessage(
 interface GenerateBody {
   auth?: AIAuth
   prompt?: string
+  /** Optional model override. When present, routing is based on this model's provider. */
+  model?: string
   applicationId?: string
   task?: GenerationRunRecord['task']
 }
@@ -61,24 +64,51 @@ export async function POST(req: NextRequest) {
   const valid = validateAIAuth(auth)
   if (!valid.ok) return NextResponse.json({ error: valid.message }, { status: 400 })
 
-  const model = modelForAuth(auth)
+  const legacyModel = modelForAuth(auth)
+  // Resolve which runner + effective model to use.
+  const bodyModel = typeof body.model === 'string' ? body.model.trim() : undefined
+  const catalogProvider = bodyModel
+    ? findCatalogEntry(FALLBACK_MODEL_CATALOG, 'anthropic', bodyModel)?.provider ??
+      findCatalogEntry(FALLBACK_MODEL_CATALOG, 'openai', bodyModel)?.provider ??
+      findCatalogEntry(FALLBACK_MODEL_CATALOG, 'codex', bodyModel)?.provider
+    : undefined
+  const resolved = resolveRunner(bodyModel, auth, catalogProvider, legacyModel)
+  if (resolved.runner === 'error') {
+    return NextResponse.json({ error: resolved.errorMessage ?? 'invalid model' }, { status: 400 })
+  }
+  const model = resolved.model
   const started = Date.now()
   try {
     let text: string
     let usage: unknown = null
 
-    if (auth.provider === 'codex') {
+    if (resolved.runner === 'codex_cli') {
       text = await runCodexCLI(prompt, model)
-    } else if (auth.method === 'local_cli') {
+    } else if (resolved.runner === 'claude_cli') {
       text = await runClaudeCLI(prompt, model)
-    } else if (auth.provider === 'anthropic') {
+    } else if (resolved.runner === 'anthropic_api') {
       const result = await callAnthropic(prompt, auth, model)
       text = result.text
       usage = result.usage
-    } else {
+    } else if (resolved.runner === 'openai_api') {
       const result = await callOpenAI(prompt, auth, model)
       text = result.text
       usage = result.usage
+    } else {
+      // legacy — route by auth provider/method as before
+      if (auth.provider === 'codex') {
+        text = await runCodexCLI(prompt, model)
+      } else if (auth.method === 'local_cli') {
+        text = await runClaudeCLI(prompt, model)
+      } else if (auth.provider === 'anthropic') {
+        const result = await callAnthropic(prompt, auth, model)
+        text = result.text
+        usage = result.usage
+      } else {
+        const result = await callOpenAI(prompt, auth, model)
+        text = result.text
+        usage = result.usage
+      }
     }
 
     const run = await recordGenerationRun({
