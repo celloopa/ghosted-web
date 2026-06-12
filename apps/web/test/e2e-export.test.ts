@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { execFile as _execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { buildResumeModel, buildExpectations } from '@ghosted/core'
+import { buildResumeModel } from '@ghosted/core'
 import { runExport, cleanExportDir, generateResumeTyp } from '../lib/server/typstExport'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -41,8 +41,6 @@ describe.skipIf(process.env.CI === 'true')('E2E export integration', () => {
     })
     expect(resumeModel, 'CV must parse correctly').not.toBeNull()
 
-    const expectations = buildExpectations(resumeModel!, MATCHED_KEYWORDS)
-
     const appId = `e2e-plain-${Date.now()}`
     let result: Awaited<ReturnType<typeof runExport>>
     try {
@@ -50,7 +48,7 @@ describe.skipIf(process.env.CI === 'true')('E2E export integration', () => {
         appId,
         resumeModel: resumeModel!,
         coverLetter: SAMPLE_COVER_LETTER,
-        expectations,
+        matchedKeywords: MATCHED_KEYWORDS,
         style: { template: 'plain-ats' },
       })
     } finally {
@@ -85,8 +83,6 @@ describe.skipIf(process.env.CI === 'true')('E2E export integration', () => {
     })
     expect(resumeModel, 'CV must parse correctly').not.toBeNull()
 
-    const expectations = buildExpectations(resumeModel!, MATCHED_KEYWORDS)
-
     const appId = `e2e-modern-${Date.now()}`
     let result: Awaited<ReturnType<typeof runExport>>
     try {
@@ -94,7 +90,7 @@ describe.skipIf(process.env.CI === 'true')('E2E export integration', () => {
         appId,
         resumeModel: resumeModel!,
         coverLetter: SAMPLE_COVER_LETTER,
-        expectations,
+        matchedKeywords: MATCHED_KEYWORDS,
         style: { template: 'modern', accentColor: CUSTOM_ACCENT, font: CUSTOM_FONT },
       })
     } finally {
@@ -128,7 +124,7 @@ describe.skipIf(process.env.CI === 'true')('E2E export integration', () => {
     })
     expect(resumeModel).not.toBeNull()
 
-    const typ = generateResumeTyp(resumeModel!, { template: 'modern', accentColor: CUSTOM_ACCENT, font: CUSTOM_FONT })
+    const { typ } = generateResumeTyp(resumeModel!, { template: 'modern', accentColor: CUSTOM_ACCENT, font: CUSTOM_FONT })
 
     const scratchDir = join(tmpdir(), `ghosted-modern-scratch-${Date.now()}`)
     await mkdir(scratchDir, { recursive: true })

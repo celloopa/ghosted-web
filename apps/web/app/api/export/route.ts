@@ -1,6 +1,6 @@
 import { stat, readdir } from 'node:fs/promises'
 import { NextRequest, NextResponse } from 'next/server'
-import { buildResumeModel, buildExpectations, normalizeDocStyle } from '@ghosted/core'
+import { buildResumeModel, normalizeDocStyle } from '@ghosted/core'
 import { runExport } from '../../../lib/server/typstExport'
 import { resolveExportDir } from '../../../lib/server/resolveExportFile'
 
@@ -59,15 +59,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'cvJson is not a valid JSON Resume (missing name or email)' }, { status: 400 })
   }
 
-  // ── Build expectations ────────────────────────────────────────────────────
+  // ── Run export ────────────────────────────────────────────────────────────
+  // matchedKeywords are passed to runExport which derives the ATS haystack
+  // from the generated plainText (template-specific) so only keywords that
+  // actually appear in the rendered PDF can end up in required_keywords.
 
   const matchedKeywords = Array.isArray(body.matchedKeywords)
     ? (body.matchedKeywords as string[]).filter((k): k is string => typeof k === 'string')
     : []
-  const expectations = buildExpectations(resumeModel, matchedKeywords)
-
-  // ── Run export ────────────────────────────────────────────────────────────
-
   const style = normalizeDocStyle(body.style)
 
   const started = Date.now()
@@ -76,7 +75,7 @@ export async function POST(req: NextRequest) {
       appId: body.appId,
       resumeModel,
       coverLetter: body.coverLetter,
-      expectations,
+      matchedKeywords,
       style,
     })
 

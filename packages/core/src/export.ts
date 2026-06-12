@@ -371,20 +371,40 @@ export function buildResumeModel(cvJson: string, opts: BuildResumeModelOptions =
  *   appear in the haystack.
  * - required_years: unique 4-digit years found across work start/end dates
  * - max_pages: 2
+ *
+ * @param model           Typed resume model.
+ * @param matchedKeywords Canonical keyword terms from extractKeywords.
+ * @param renderedText    Plain-text assembled from exactly the strings the
+ *   generator rendered into the document. When supplied this is used as the
+ *   keyword haystack instead of the model fields, so that only keywords that
+ *   actually appear in the PDF can end up in required_keywords.
+ *   Obtain it from generateResumeTyp(model, style).plainText.
+ *   Falls back to deriving the haystack from model fields when omitted (legacy
+ *   call-sites and tests that construct expectations without a generator).
  */
-export function buildExpectations(model: ResumeModel, matchedKeywords: string[]): AtsExpectations {
+export function buildExpectations(
+  model: ResumeModel,
+  matchedKeywords: string[],
+  renderedText?: string,
+): AtsExpectations {
   const requiredStrings: string[] = [model.name]
   if (model.email) requiredStrings.push(model.email)
 
-  // Build the resume haystack: summary + work highlights + skills + positions,
-  // all lowercased and joined. This mirrors what the typst output will contain.
-  const haystackParts: string[] = [model.summary]
-  for (const w of model.work) {
-    if (w.position) haystackParts.push(w.position)
-    haystackParts.push(...w.highlights)
+  // Haystack: prefer the rendered plainText from the generator (exact set of
+  // strings that reached the PDF). Fall back to deriving from model fields for
+  // call-sites that don't yet pass renderedText (legacy / unit test fixtures).
+  let haystack: string
+  if (renderedText !== undefined && renderedText.length > 0) {
+    haystack = renderedText.toLowerCase()
+  } else {
+    const haystackParts: string[] = [model.summary]
+    for (const w of model.work) {
+      if (w.position) haystackParts.push(w.position)
+      haystackParts.push(...w.highlights)
+    }
+    haystackParts.push(...model.skills)
+    haystack = haystackParts.join(' ').toLowerCase()
   }
-  haystackParts.push(...model.skills)
-  const haystack = haystackParts.join(' ').toLowerCase()
 
   // Resolve each matched keyword to the alias surface form present in the
   // resume. De-duplicate and cap at 5 AFTER filtering absent terms.

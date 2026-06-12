@@ -11,7 +11,7 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import type { ResumeModel, AtsExpectations, DocStyle } from '@ghosted/core'
-import { typstEscape } from '@ghosted/core'
+import { typstEscape, buildExpectations } from '@ghosted/core'
 
 const execFile = promisify(_execFile)
 
@@ -68,6 +68,20 @@ function fmtDates(start?: string, end?: string): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * The result of a resume generator call.
+ * `typ` is the full Typst source.
+ * `plainText` is the concatenation of every human-readable string that the
+ * generator actually emits into the document (same set used for ATS haystack).
+ * It is assembled directly from the values pushed into the rendered output so
+ * that buildExpectations sees exactly what the PDF will contain — no model
+ * fields that go un-rendered (e.g. skill sub-keywords, projects section, etc.).
+ */
+export interface ResumeTypResult {
+  typ: string
+  plainText: string
+}
+
+/**
  * Build a modern-cv resume document mirroring the originals exactly.
  * The package's knobs (from lib.typ source):
  *   accent-color: color (accepts string → rgb() internally in 0.9.0)
@@ -83,7 +97,7 @@ function fmtDates(start?: string, end?: string): string {
  *   font → font param as first family with package default as fallback,
  *          PLUS a post-show #set text() override so body text uses the choice.
  */
-function generateModernResumeTyp(model: ResumeModel, style: DocStyle): string {
+function generateModernResumeTyp(model: ResumeModel, style: DocStyle): ResumeTypResult {
   const lines: string[] = []
   const m = model.modern
 
@@ -92,28 +106,37 @@ function generateModernResumeTyp(model: ResumeModel, style: DocStyle): string {
   const firstname = m ? eStr(m.firstname) : eStr(model.name.split(' ').slice(0, -1).join(' ') || model.name)
   const lastname = m ? eStr(m.lastname) : eStr(model.name.split(' ').slice(-1)[0] ?? model.name)
 
+  // plainText accumulates every human-readable string the template renders.
+  // It is used by buildExpectations so the ATS haystack matches exactly what
+  // the PDF will contain — no fields that are in the model but not rendered.
+  const plain: string[] = []
+
   lines.push('#import "@preview/modern-cv:0.9.0": *')
   lines.push('')
   lines.push('#show: resume.with(')
   lines.push('  author: (')
   lines.push(`    firstname: "${firstname}",`)
   lines.push(`    lastname: "${lastname}",`)
+  plain.push(model.name)
   lines.push(`    email: "${eStr(model.email)}",`)
+  plain.push(model.email)
   if (m?.homepage) lines.push(`    homepage: "${eStr(m.homepage)}",`)
-  if (model.phone) lines.push(`    phone: "${eStr(model.phone)}",`)
+  if (model.phone) { lines.push(`    phone: "${eStr(model.phone)}",`); plain.push(model.phone) }
   if (m?.github) lines.push(`    github: "${eStr(m.github)}",`)
   if (m?.linkedin) lines.push(`    linkedin: "${eStr(m.linkedin)}",`)
-  if (model.location) lines.push(`    address: "${eStr(model.location)}",`)
+  if (model.location) { lines.push(`    address: "${eStr(model.location)}",`); plain.push(model.location) }
   if (m?.positions && m.positions.length > 0) {
     lines.push('    positions: (')
     for (const pos of m.positions) {
       lines.push(`      "${eStr(pos)}",`)
+      plain.push(pos)
     }
     lines.push('    ),')
   }
   lines.push('  ),')
   if (model.summary) {
     lines.push(`  description: "${eStr(model.summary)}",`)
+    plain.push(model.summary)
   }
   lines.push('  profile-picture: none,')
   lines.push(`  date: datetime.today().display(),`)
@@ -142,15 +165,19 @@ function generateModernResumeTyp(model: ResumeModel, style: DocStyle): string {
     // resume-entry args are Typst string literals — use eStr (@ safe in strings)
     lines.push('#resume-entry(')
     lines.push(`  title: "${eStr(w.position ?? w.name)}",`)
+    plain.push(w.position ?? w.name)
     lines.push(`  location: "",`)
     lines.push(`  date: "${eStr(dates)}",`)
+    plain.push(dates)
     lines.push(`  description: "${eStr(w.name)}",`)
+    plain.push(w.name)
     lines.push(')')
     lines.push('')
     // resume-item content is in [...] (content mode) — use e() for full escaping
     lines.push('#resume-item[')
     for (const h of w.highlights) {
       lines.push(`  - ${e(h)}`)
+      plain.push(h)
     }
     lines.push(']')
     lines.push('')
@@ -163,6 +190,7 @@ function generateModernResumeTyp(model: ResumeModel, style: DocStyle): string {
     // resume-skill-item args are string literals — use eStr
     const skillItems = model.skills.map((s) => `"${eStr(s)}"`).join(', ')
     lines.push(`#resume-skill-item("Skills", (${skillItems}))`)
+    plain.push(...model.skills)
   }
   lines.push('')
 
@@ -174,14 +202,16 @@ function generateModernResumeTyp(model: ResumeModel, style: DocStyle): string {
     const area = edu.area ? `${eStr(edu.area)}${yearPart}` : yearPart
     lines.push('#resume-entry(')
     lines.push(`  title: "${eStr(edu.institution)}",`)
+    plain.push(edu.institution)
     lines.push(`  location: "",`)
     lines.push(`  date: "${yearPart.replace(/[()]/g, '').trim()}",`)
     lines.push(`  description: "${area}",`)
+    if (edu.area) plain.push(edu.area)
     lines.push(')')
     lines.push('')
   }
 
-  return lines.join('\n')
+  return { typ: lines.join('\n'), plainText: plain.join(' ') }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -196,8 +226,10 @@ function generateModernResumeTyp(model: ResumeModel, style: DocStyle): string {
  *   - hyphenate: false
  *   - headings "Experience", "Skills", "Education" in that exact order
  */
-function generatePlainResumeTyp(model: ResumeModel, style: DocStyle): string {
+function generatePlainResumeTyp(model: ResumeModel, style: DocStyle): ResumeTypResult {
   const lines: string[] = []
+  // plainText accumulates every human-readable string the template renders.
+  const plain: string[] = []
 
   // Page and text settings — must match the vendored template's ATS-safe settings
   // Slightly tighter margins + smaller font to keep the full CV within 2 pages.
@@ -231,16 +263,20 @@ function generatePlainResumeTyp(model: ResumeModel, style: DocStyle): string {
   // Header — name, optional phone/location, email, links
   lines.push('#align(center)[')
   lines.push(`  #text(size: 18pt, weight: "bold")["${e(model.name)}"] \\`)
+  plain.push(model.name)
   if (model.location) {
     const contactLine = [model.location, model.email, model.phone].filter(Boolean).join(' · ')
     lines.push(`  #text(size: 9.5pt)["${e(contactLine)}"] \\`)
+    plain.push(contactLine)
   } else {
     const contactLine = [model.email, model.phone].filter(Boolean).join(' · ')
     lines.push(`  #text(size: 9.5pt)["${e(contactLine)}"] \\`)
+    plain.push(contactLine)
   }
   if (model.links.length > 0) {
     const linkLine = model.links.map((l) => l.label).join(' · ')
     lines.push(`  #text(size: 9.5pt)["${e(linkLine)}"]`)
+    plain.push(linkLine)
   }
   lines.push(']')
   lines.push('#v(2pt)')
@@ -249,6 +285,7 @@ function generatePlainResumeTyp(model: ResumeModel, style: DocStyle): string {
   if (model.summary) {
     lines.push(`"${e(model.summary)}"`)
     lines.push('#v(3pt)')
+    plain.push(model.summary)
   }
   lines.push('')
 
@@ -261,13 +298,17 @@ function generatePlainResumeTyp(model: ResumeModel, style: DocStyle): string {
     const bulletArray = w.highlights.map((h) => `"${e(h)}"`).join(',\n    ')
     lines.push(`#role(`)
     lines.push(`  "${e(w.name)}",`)
+    plain.push(w.name)
     lines.push(`  "${e(w.position ?? '')}",`)
+    if (w.position) plain.push(w.position)
     lines.push(`  "${e(dates)}",`)
+    plain.push(dates)
     lines.push(`  "${e(loc)}",`)
     lines.push(`  (`)
     lines.push(`    ${bulletArray},`)
     lines.push(`  ),`)
     lines.push(`)`)
+    for (const h of w.highlights) plain.push(h)
   }
   lines.push('')
 
@@ -275,6 +316,7 @@ function generatePlainResumeTyp(model: ResumeModel, style: DocStyle): string {
   lines.push('#section("Skills")')
   if (model.skills.length > 0) {
     lines.push(model.skills.map((s) => e(s)).join(', '))
+    plain.push(...model.skills)
   }
   lines.push('')
 
@@ -284,20 +326,25 @@ function generatePlainResumeTyp(model: ResumeModel, style: DocStyle): string {
     const yearPart = edu.year ? ` (${edu.year})` : ''
     const areaPart = edu.area ? ` — ${edu.area}${yearPart}` : yearPart
     lines.push(`#text(weight: "bold")["${e(edu.institution)}"]`)
+    plain.push(edu.institution)
     if (areaPart) {
       lines.push(`"${e(areaPart)}"`)
+      if (edu.area) plain.push(edu.area)
     }
     lines.push('#v(3pt)')
   }
 
-  return lines.join('\n')
+  return { typ: lines.join('\n'), plainText: plain.join(' ') }
 }
 
 /**
  * Produce a complete Typst resume document from a ResumeModel.
  * Routes to the modern-cv or plain-ATS template based on style.template.
+ * Returns { typ, plainText } where plainText is assembled from exactly the
+ * strings rendered by the template — use it as the ATS haystack so that
+ * buildExpectations never asserts a keyword that the PDF won't contain.
  */
-export function generateResumeTyp(model: ResumeModel, style: DocStyle = { template: 'modern' }): string {
+export function generateResumeTyp(model: ResumeModel, style: DocStyle = { template: 'modern' }): ResumeTypResult {
   if (style.template === 'modern') return generateModernResumeTyp(model, style)
   return generatePlainResumeTyp(model, style)
 }
@@ -408,7 +455,17 @@ export interface RunExportInput {
   appId: string
   resumeModel: ResumeModel
   coverLetter: string
-  expectations: AtsExpectations
+  /**
+   * Pre-built expectations — used when the caller has already constructed
+   * them (e.g. from the e2e test). When supplied, they are used as-is.
+   * Prefer passing matchedKeywords instead so runExport can derive the
+   * keyword haystack from the generated plainText.
+   */
+  expectations?: AtsExpectations
+  /** Canonical keyword terms from extractKeywords. When supplied, runExport
+   * builds expectations internally using the plainText from the generated
+   * .typ so that only keywords actually rendered in the PDF are asserted. */
+  matchedKeywords?: string[]
   style?: DocStyle
 }
 
@@ -443,8 +500,17 @@ export async function runExport(input: RunExportInput): Promise<ExportResult> {
 
   const style: DocStyle = input.style ?? { template: 'modern' }
 
-  // Write source files
-  const resumeTyp = generateResumeTyp(input.resumeModel, style)
+  // Generate resume .typ — plainText is used to derive the expectations haystack
+  // so that only keywords actually rendered in the PDF are asserted.
+  const { typ: resumeTyp, plainText } = generateResumeTyp(input.resumeModel, style)
+
+  // Build expectations: prefer pre-built (passed by caller); otherwise derive
+  // from matchedKeywords using plainText as the haystack (the fix — template-
+  // specific, derived from what was actually rendered).
+  const expectations: AtsExpectations =
+    input.expectations ??
+    buildExpectations(input.resumeModel, input.matchedKeywords ?? [], plainText)
+
   const coverTyp = generateCoverLetterTyp({
     name: input.resumeModel.name,
     email: input.resumeModel.email,
@@ -456,7 +522,7 @@ export async function runExport(input: RunExportInput): Promise<ExportResult> {
   await Promise.all([
     writeFile(resumeTypPath, resumeTyp, 'utf8'),
     writeFile(coverTypPath, coverTyp, 'utf8'),
-    writeFile(expectPath, JSON.stringify(input.expectations, null, 2), 'utf8'),
+    writeFile(expectPath, JSON.stringify(expectations, null, 2), 'utf8'),
   ])
 
   // Compile both PDFs in parallel

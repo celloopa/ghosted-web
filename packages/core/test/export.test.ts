@@ -350,6 +350,69 @@ describe('typstEscape', () => {
   })
 })
 
+// ── buildExpectations — renderedText param ────────────────────────────────────
+
+describe('buildExpectations — renderedText overrides model-derived haystack', () => {
+  it('drops a keyword whose evidence lives only in model fields not rendered by the modern template', () => {
+    // Simulate: model has 'prototyping' evidence only in a field that the modern
+    // template does NOT render (e.g. a notes field, volunteer section, or a skill
+    // sub-keyword). The rendered document does NOT contain any 'prototyp*' text.
+    const model = buildResumeModel(JSON.stringify({
+      basics: { name: 'Dev', email: 'd@x.io', summary: 'React developer.' },
+      work: [{ name: 'Acme', highlights: ['Built React components.'] }],
+      skills: [{ name: 'React' }],
+      education: [],
+    }))!
+    // The rendered document only has "React developer. Acme Built React components. React"
+    const renderedText = 'Dev d@x.io React developer. Acme Built React components. React'
+    // 'Prototyping' — all aliases ('prototype', 'prototyping', 'prototypes') absent
+    const exp = buildExpectations(model, ['Prototyping', 'React'], renderedText)
+    expect(exp.required_keywords).not.toContain('prototyping')
+    expect(exp.required_keywords).not.toContain('prototype')
+    expect(exp.required_keywords).not.toContain('prototypes')
+    expect(exp.required_keywords).toContain('react')
+  })
+
+  it('includes a keyword whose evidence IS in the rendered text', () => {
+    const model = buildResumeModel(JSON.stringify({
+      basics: { name: 'Dev', email: 'd@x.io', summary: 'Built prototypes of key flows.' },
+      work: [],
+      skills: [],
+      education: [],
+    }))!
+    const renderedText = 'Dev d@x.io Built prototypes of key flows.'
+    const exp = buildExpectations(model, ['Prototyping'], renderedText)
+    // 'prototypes' alias is present → must be asserted
+    expect(exp.required_keywords).toContain('prototypes')
+  })
+
+  it('falls back to model-derived haystack when renderedText is not provided', () => {
+    // Legacy call-site without renderedText: still works using model fields
+    const model = buildResumeModel(CV_WITH_ALIASES)!
+    const exp = buildExpectations(model, ['Prototyping'])
+    // CV_WITH_ALIASES has 'prototypes' in highlights
+    const haystack = [model.summary, ...model.work.flatMap((w) => w.highlights), ...model.skills].join(' ').toLowerCase()
+    const hasVariant = exp.required_keywords.some((kw) => haystack.includes(kw))
+    expect(hasVariant).toBe(true)
+  })
+
+  it('plain-ats vs modern: same keyword present in plain-ats rendered text but absent from modern rendered text is correctly split', () => {
+    // Build two different renderedTexts — one that has 'design system', one that does not
+    const model = buildResumeModel(JSON.stringify({
+      basics: { name: 'A', email: 'a@a.io', summary: 'Engineer.' },
+      work: [{ name: 'Corp', highlights: ['Built design system.'] }],
+      skills: [],
+      education: [],
+    }))!
+    const plainRendered = 'A a@a.io Engineer. Corp Built design system.'
+    const modernRendered = 'A a@a.io Engineer. Corp Built UI components.'  // different highlight
+    const expPlain = buildExpectations(model, ['Design Systems'], plainRendered)
+    const expModern = buildExpectations(model, ['Design Systems'], modernRendered)
+    expect(expPlain.required_keywords).toContain('design system')
+    expect(expModern.required_keywords).not.toContain('design system')
+  })
+})
+
 // ── buildExpectations — variant-aware keyword matching ────────────────────────
 
 describe('buildExpectations — keyword variants match what the resume actually says', () => {

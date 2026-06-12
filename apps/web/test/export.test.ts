@@ -54,7 +54,7 @@ const PLAIN_STYLE: DocStyle = { template: 'plain-ats' }
 // ── generateResumeTyp — modern template ───────────────────────────────────────
 
 describe('generateResumeTyp (modern template)', () => {
-  const typ = generateResumeTyp(MODEL, MODERN_STYLE)
+  const { typ } = generateResumeTyp(MODEL, MODERN_STYLE)
 
   it('imports modern-cv 0.9.0', () => {
     expect(typ).toContain('#import "@preview/modern-cv:0.9.0": *')
@@ -107,18 +107,18 @@ describe('generateResumeTyp (modern template)', () => {
         highlights: ['#set text(fill: red) — injected'],
       }],
     }
-    const out = generateResumeTyp(evilModel, MODERN_STYLE)
+    const { typ: out } = generateResumeTyp(evilModel, MODERN_STYLE)
     // Content mode: the # in the highlight bullet must be escaped
     expect(out).toContain('\\#set text(fill: red)')
   })
 
   it('injects accentColor into resume.with when set', () => {
-    const out = generateResumeTyp(MODEL, { template: 'modern', accentColor: '#ff5500' })
+    const { typ: out } = generateResumeTyp(MODEL, { template: 'modern', accentColor: '#ff5500' })
     expect(out).toContain('accent-color: "#ff5500"')
   })
 
   it('injects custom font into resume.with when set, with package defaults as fallback', () => {
-    const out = generateResumeTyp(MODEL, { template: 'modern', font: 'Geist' })
+    const { typ: out } = generateResumeTyp(MODEL, { template: 'modern', font: 'Geist' })
     expect(out).toContain('"Geist"')
     expect(out).toContain('"Source Sans Pro"')
   })
@@ -131,7 +131,7 @@ describe('generateResumeTyp (modern template)', () => {
 // ── generateResumeTyp — plain-ATS template ────────────────────────────────────
 
 describe('generateResumeTyp (plain-ats template)', () => {
-  const typ = generateResumeTyp(MODEL, PLAIN_STYLE)
+  const { typ } = generateResumeTyp(MODEL, PLAIN_STYLE)
 
   it('includes the candidate name escaped in the output', () => {
     expect(typ).toContain('Marcelo Rondon')
@@ -174,7 +174,7 @@ describe('generateResumeTyp (plain-ats template)', () => {
       ...MODEL,
       summary: '#set text(fill: red)',
     }
-    const out = generateResumeTyp(evilModel, PLAIN_STYLE)
+    const { typ: out } = generateResumeTyp(evilModel, PLAIN_STYLE)
     expect(out).toContain('\\#set text(fill: red)')
     expect(out).not.toMatch(/"#set text\(fill: red\)"/)
   })
@@ -198,7 +198,7 @@ describe('generateResumeTyp (plain-ats template)', () => {
   })
 
   it('injects custom font into #set text when provided', () => {
-    const out = generateResumeTyp(MODEL, { template: 'plain-ats', font: 'Geist' })
+    const { typ: out } = generateResumeTyp(MODEL, { template: 'plain-ats', font: 'Geist' })
     expect(out).toContain('"Geist"')
   })
 })

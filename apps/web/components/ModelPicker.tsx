@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { FALLBACK_MODEL_CATALOG, runnableWith, type ModelCatalogEntry } from '@ghosted/core'
 import { useAIAuth } from '../lib/useAIAuth'
 import { useModelChoice } from '../lib/useModelChoice'
+import { buildPickerEntries } from '../lib/pickerModels'
 
 interface ModelsResponse {
   models: ModelCatalogEntry[]
@@ -11,9 +12,15 @@ interface ModelsResponse {
 }
 
 /**
- * Compact model picker that groups options by provider (Claude / OpenAI) and
- * greys out entries that cannot be run with the current auth + CLI availability.
- * Persists the choice in localStorage via useModelChoice.
+ * Compact model picker that groups options by provider (Claude / OpenAI).
+ *
+ * - Entries not runnable with the current connections are NOT rendered at all.
+ * - Duplicates are merged: prefers runnable entries, then the local fallback
+ *   catalog over OpenRouter entries (curated pricing). Deduplication covers
+ *   both model-id collisions and display-label collisions within a group.
+ * - When a provider group ends up empty, renders a single disabled placeholder.
+ * - When both groups are empty, renders a single "no AI connection" option.
+ * - Persists the choice in localStorage via useModelChoice.
  */
 export function ModelPicker() {
   const { auth } = useAIAuth()
@@ -38,26 +45,27 @@ export function ModelPicker() {
     }
   }, [])
 
-  const opts: { claudeCli: boolean; codexCli: boolean; anthropicKey: boolean; openaiKey: boolean } = {
-    claudeCli: available.claude_cli || auth?.method === 'local_cli' && auth.provider === 'anthropic',
-    codexCli: available.codex_cli || auth?.method === 'local_cli' && auth.provider === 'codex',
+  const opts = {
+    claudeCli: available.claude_cli || (auth?.method === 'local_cli' && auth.provider === 'anthropic'),
+    codexCli: available.codex_cli || (auth?.method === 'local_cli' && auth.provider === 'codex'),
     anthropicKey: auth?.provider === 'anthropic' && (auth.method === 'api_key' || auth.method === 'oauth_token'),
     openaiKey: auth?.provider === 'openai' && auth.method === 'api_key',
   }
 
-  const anthropicModels = catalog.filter((m) => m.provider === 'anthropic')
-  const openaiModels = catalog.filter((m) => m.provider === 'openai' || m.provider === 'codex')
+  const { claudeEntries, openaiEntries } = buildPickerEntries(catalog, opts)
 
-  // Pick a sensible default: prefer a sonnet-class Claude if Claude CLI is present.
+  // Pick a sensible default: prefer a standard-class Claude, then any runnable entry.
   const firstRunnable =
-    catalog.find((m) => runnableWith(m, opts) && m.provider === 'anthropic' && m.modelClass === 'standard') ??
-    catalog.find((m) => runnableWith(m, opts)) ??
-    catalog[0]
+    claudeEntries.find((e) => {
+      const m = catalog.find((c) => c.id === e.id && c.provider === 'anthropic')
+      return m?.modelClass === 'standard'
+    }) ??
+    claudeEntries[0] ??
+    openaiEntries[0]
 
   const { model, setModel } = useModelChoice(firstRunnable?.id ?? '')
 
-  const claudeUnavailable = !opts.claudeCli && !opts.anthropicKey
-  const openaiUnavailable = !opts.codexCli && !opts.openaiKey
+  const bothEmpty = claudeEntries.length === 0 && openaiEntries.length === 0
 
   return (
     <div>
@@ -68,43 +76,42 @@ export function ModelPicker() {
           value={model}
           onChange={(e) => setModel(e.target.value)}
         >
-          {anthropicModels.length > 0 && (
-            <optgroup label="Claude">
-              {anthropicModels.map((m) => {
-                const runnable = runnableWith(m, opts)
-                return (
-                  <option key={`${m.provider}:${m.id}`} value={m.id} disabled={!runnable}>
-                    {m.label}{!runnable ? ' (unavailable)' : ''}
+          {bothEmpty ? (
+            <option value="" disabled>
+              No AI connection — connect Claude CLI, Codex CLI, or an API key
+            </option>
+          ) : (
+            <>
+              <optgroup label="Claude">
+                {claudeEntries.length > 0 ? (
+                  claudeEntries.map((e) => (
+                    <option key={e.key} value={e.id}>
+                      {e.label}
+                    </option>
+                  ))
+                ) : (
+                  <option value="" disabled>
+                    Claude — connect Claude CLI or an Anthropic API key
                   </option>
-                )
-              })}
-            </optgroup>
-          )}
-          {openaiModels.length > 0 && (
-            <optgroup label="OpenAI">
-              {openaiModels.map((m) => {
-                const runnable = runnableWith(m, opts)
-                return (
-                  <option key={`${m.provider}:${m.id}`} value={m.id} disabled={!runnable}>
-                    {m.label}{!runnable ? ' (unavailable)' : ''}
+                )}
+              </optgroup>
+              <optgroup label="OpenAI">
+                {openaiEntries.length > 0 ? (
+                  openaiEntries.map((e) => (
+                    <option key={e.key} value={e.id}>
+                      {e.label}
+                    </option>
+                  ))
+                ) : (
+                  <option value="" disabled>
+                    OpenAI — connect Codex CLI or an OpenAI API key
                   </option>
-                )
-              })}
-            </optgroup>
+                )}
+              </optgroup>
+            </>
           )}
         </select>
       </label>
-
-      {claudeUnavailable && (
-        <p className="dim small">
-          Claude CLI not detected and no Anthropic key connected — Claude models unavailable.
-        </p>
-      )}
-      {openaiUnavailable && (
-        <p className="dim small">
-          codex CLI not detected — OpenAI models hidden.
-        </p>
-      )}
     </div>
   )
 }
