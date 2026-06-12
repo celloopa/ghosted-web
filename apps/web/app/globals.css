@@ -1012,3 +1012,69 @@ a {
 .questions-card:last-child {
   margin-bottom: 0;
 }
+
+/* ---- document rows (detail page Documents card) ---- */
+
+.doc-rows {
+  display: grid;
+  gap: 0;
+  margin-bottom: 14px;
+}
+
+.doc-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.doc-row:last-child {
+  border-bottom: none;
+}
+
+.doc-row-name {
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.doc-row-actions {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.doc-action {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 2px;
+  transition: color var(--motion-fast), text-decoration-color var(--motion-fast);
+}
+
+.doc-action:hover {
+  color: var(--text-primary);
+  text-decoration-color: currentColor;
+}
+
+.doc-action-sep {
+  color: var(--border-subtle);
+  font-size: 13px;
+  user-select: none;
+}
+
+@media (max-width: 480px) {
+  .doc-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+}

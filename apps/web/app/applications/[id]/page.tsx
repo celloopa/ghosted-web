@@ -97,6 +97,15 @@ function DocumentsSection({ app }: { app: Application }) {
   const generatedAt = materials.generated_at ? relativeDate(materials.generated_at) : 'unknown'
   const exportedAt = materials.exported_at ? shortDate(materials.exported_at) : 'not yet'
 
+  // PDF lookup helpers
+  const pdfFor = (name: string) => pdfFiles.find((f) => f.name === name)
+  const coverPdf = pdfFor('cover-letter.pdf')
+  const resumePdf = pdfFor('resume.pdf')
+
+  function pdfHref(serverName: string, friendlyName: string) {
+    return `/api/export/file?appId=${encodeURIComponent(app.id)}&name=${encodeURIComponent(serverName)}&dl=${encodeURIComponent(friendlyName)}`
+  }
+
   return (
     <section className="section">
       <div className="card reveal">
@@ -113,71 +122,94 @@ function DocumentsSection({ app }: { app: Application }) {
           </p>
         )}
 
-        {/* Markdown grab actions */}
-        <div className="row gap wrap" style={{ marginBottom: 14 }}>
+        {/* Document rows — one per document */}
+        <div className="doc-rows">
           {materials.cover_letter && (
-            <>
-              <button
-                className="btn btn-small"
-                onClick={() => copy('letter', materials.cover_letter!)}
-              >
-                {copied === 'letter' ? 'copied' : 'copy'} {coverLetterName}
-              </button>
-              <button
-                className="btn btn-small"
-                onClick={() => downloadBlob(materials.cover_letter!, coverLetterName)}
-              >
-                ↓ {coverLetterName}
-              </button>
-            </>
+            <div className="doc-row">
+              <span className="doc-row-name">Cover letter</span>
+              <span className="doc-row-actions">
+                <button
+                  className="doc-action"
+                  onClick={() => copy('letter', materials.cover_letter!)}
+                >
+                  {copied === 'letter' ? 'copied' : 'copy'}
+                </button>
+                <span className="doc-action-sep" aria-hidden>·</span>
+                <button
+                  className="doc-action"
+                  onClick={() => downloadBlob(materials.cover_letter!, coverLetterName)}
+                >
+                  md
+                </button>
+                {coverPdf && (
+                  <>
+                    <span className="doc-action-sep" aria-hidden>·</span>
+                    <a
+                      className="doc-action"
+                      href={pdfHref('cover-letter.pdf', `${companySlugged}-cover-letter.pdf`)}
+                      download={`${companySlugged}-cover-letter.pdf`}
+                    >
+                      pdf
+                    </a>
+                  </>
+                )}
+              </span>
+            </div>
           )}
           {materials.resume_adjustments && (
-            <>
-              <button
-                className="btn btn-small"
-                onClick={() => copy('adj', materials.resume_adjustments!)}
-              >
-                {copied === 'adj' ? 'copied' : 'copy'} {resumeAdjName}
-              </button>
-              <button
-                className="btn btn-small"
-                onClick={() => downloadBlob(materials.resume_adjustments!, resumeAdjName)}
-              >
-                ↓ {resumeAdjName}
-              </button>
-            </>
+            <div className="doc-row">
+              <span className="doc-row-name">Resume adjustments</span>
+              <span className="doc-row-actions">
+                <button
+                  className="doc-action"
+                  onClick={() => copy('adj', materials.resume_adjustments!)}
+                >
+                  {copied === 'adj' ? 'copied' : 'copy'}
+                </button>
+                <span className="doc-action-sep" aria-hidden>·</span>
+                <button
+                  className="doc-action"
+                  onClick={() => downloadBlob(materials.resume_adjustments!, resumeAdjName)}
+                >
+                  md
+                </button>
+                {resumePdf && (
+                  <>
+                    <span className="doc-action-sep" aria-hidden>·</span>
+                    <a
+                      className="doc-action"
+                      href={pdfHref('resume.pdf', `${companySlugged}-resume.pdf`)}
+                      download={`${companySlugged}-resume.pdf`}
+                    >
+                      pdf
+                    </a>
+                  </>
+                )}
+              </span>
+            </div>
           )}
-          {/* PDF download links */}
-          {pdfFiles.map((f) => {
-            const friendlyName = f.name === 'resume.pdf'
-              ? `${companySlugged}-resume.pdf`
-              : `${companySlugged}-cover-letter.pdf`
-            const href = `/api/export/file?appId=${encodeURIComponent(app.id)}&name=${encodeURIComponent(f.name)}&dl=${encodeURIComponent(friendlyName)}`
-            return (
-              <a key={f.name} href={href} className="btn btn-small" download={friendlyName}>
-                ↓ {f.name}
-              </a>
-            )
-          })}
-          {/* Application Q&A */}
           {materials.qa?.length ? (() => {
             const questionsName = buildDownloadName(app.company, 'questions')
             const questionsContent = renderQuestionsDoc(app.company, app.position, materials.qa)
             return (
-              <>
-                <button
-                  className="btn btn-small"
-                  onClick={() => copy('qa', questionsContent)}
-                >
-                  {copied === 'qa' ? 'copied' : 'copy'} {questionsName}
-                </button>
-                <button
-                  className="btn btn-small"
-                  onClick={() => downloadBlob(questionsContent, questionsName)}
-                >
-                  ↓ {questionsName}
-                </button>
-              </>
+              <div className="doc-row">
+                <span className="doc-row-name">Questions ({materials.qa.length})</span>
+                <span className="doc-row-actions">
+                  <button
+                    className="doc-action"
+                    onClick={() => copy('qa', questionsContent)}
+                  >
+                    {copied === 'qa' ? 'copied' : 'copy'}
+                  </button>
+                  <span className="doc-action-sep" aria-hidden>·</span>
+                  <button
+                    className="doc-action"
+                    onClick={() => downloadBlob(questionsContent, questionsName)}
+                  >
+                    md
+                  </button>
+                </span>
+              </div>
             )
           })() : null}
         </div>
