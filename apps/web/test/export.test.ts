@@ -126,6 +126,51 @@ describe('generateResumeTyp (modern template)', () => {
   it('does not emit accent-color line when accentColor is absent', () => {
     expect(typ).not.toContain('accent-color:')
   })
+
+  // ── plainText regression: metadata params must NOT appear in plainText ────────
+  //
+  // The modern-cv resume.with(description:) param maps to PDF document metadata,
+  // not a visible rendered paragraph. pdftotext will not extract it.
+  // If the summary's ONLY appearance is in description:, plainText must not
+  // contain it — otherwise buildExpectations asserts a keyword that cannot be found.
+
+  it('plainText includes work highlights (visible content)', () => {
+    const { plainText } = generateResumeTyp(MODEL, MODERN_STYLE)
+    // Highlights are in resume-item content nodes — they ARE visible
+    expect(plainText).toContain('Built reusable UI components integrated into WordPress.')
+  })
+
+  it('plainText includes skills (visible content)', () => {
+    const { plainText } = generateResumeTyp(MODEL, MODERN_STYLE)
+    expect(plainText).toContain('React')
+    expect(plainText).toContain('TypeScript')
+  })
+
+  it('plainText does NOT contain the summary string (description: is metadata, invisible to pdftotext)', () => {
+    // Regression: summary was incorrectly included in plainText via plain.push(model.summary).
+    // The modern-cv template puts summary in resume.with(description:) which is PDF metadata only.
+    const { plainText } = generateResumeTyp(MODEL, MODERN_STYLE)
+    expect(plainText).not.toContain(MODEL.summary)
+  })
+
+  it('plainText does not contain unique summary-only keywords when summary is the only occurrence', () => {
+    // A keyword that appears ONLY in the summary must be absent from plainText,
+    // because the summary is in the description: metadata param — never page content.
+    const uniqueWord = 'xyzPrototypingUniqueWord99'
+    const modelWithUniqueSummary: ResumeModel = {
+      ...MODEL,
+      summary: `Senior engineer focused on ${uniqueWord} and system design.`,
+    }
+    const { plainText } = generateResumeTyp(modelWithUniqueSummary, MODERN_STYLE)
+    expect(plainText).not.toContain(uniqueWord)
+  })
+
+  it('typ still contains description: param (faithful to original template)', () => {
+    // The .typ source should still emit description: (harmless metadata) — just
+    // the plainText must exclude it.
+    const { typ: out } = generateResumeTyp(MODEL, MODERN_STYLE)
+    expect(out).toContain(`description: "${MODEL.summary}"`)
+  })
 })
 
 // ── generateResumeTyp — plain-ATS template ────────────────────────────────────
@@ -200,6 +245,28 @@ describe('generateResumeTyp (plain-ats template)', () => {
   it('injects custom font into #set text when provided', () => {
     const { typ: out } = generateResumeTyp(MODEL, { template: 'plain-ats', font: 'Geist' })
     expect(out).toContain('"Geist"')
+  })
+
+  // ── plainText regression: plain-ats renders summary visibly ─────────────────
+  //
+  // Contrast with modern: plain-ats emits the summary as a content paragraph
+  // ("${e(model.summary)}") so it IS visible to pdftotext and MUST be in plainText.
+
+  it('plainText contains the summary (plain-ats renders it as a visible paragraph)', () => {
+    const { plainText } = generateResumeTyp(MODEL, PLAIN_STYLE)
+    expect(plainText).toContain(MODEL.summary)
+  })
+
+  it('plainText contains a unique summary-only keyword for plain-ats (summary is visible content)', () => {
+    // The same keyword that must be absent from modern plainText must be present
+    // for plain-ats because the template renders the summary as page content.
+    const uniqueWord = 'xyzPrototypingUniqueWord99'
+    const modelWithUniqueSummary: ResumeModel = {
+      ...MODEL,
+      summary: `Senior engineer focused on ${uniqueWord} and system design.`,
+    }
+    const { plainText } = generateResumeTyp(modelWithUniqueSummary, PLAIN_STYLE)
+    expect(plainText).toContain(uniqueWord)
   })
 })
 

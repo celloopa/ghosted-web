@@ -106,9 +106,12 @@ function generateModernResumeTyp(model: ResumeModel, style: DocStyle): ResumeTyp
   const firstname = m ? eStr(m.firstname) : eStr(model.name.split(' ').slice(0, -1).join(' ') || model.name)
   const lastname = m ? eStr(m.lastname) : eStr(model.name.split(' ').slice(-1)[0] ?? model.name)
 
-  // plainText accumulates every human-readable string the template renders.
-  // It is used by buildExpectations so the ATS haystack matches exactly what
-  // the PDF will contain — no fields that are in the model but not rendered.
+  // plainText accumulates every human-readable string the template renders as
+  // VISIBLE PAGE CONTENT — metadata params are invisible to pdftotext extraction.
+  // Rule: only push to plain[] when the value reaches a rendered content node
+  // (resume-item bullets, resume-entry title/description, header fields).
+  // EXCLUDED from plain[]: resume.with(description:) — this is document metadata
+  // (PDF Description field), never rendered as a visible paragraph on the page.
   const plain: string[] = []
 
   lines.push('#import "@preview/modern-cv:0.9.0": *')
@@ -135,8 +138,10 @@ function generateModernResumeTyp(model: ResumeModel, style: DocStyle): ResumeTyp
   }
   lines.push('  ),')
   if (model.summary) {
+    // description: maps to PDF document metadata — NOT a visible rendered paragraph.
+    // Keep it in the .typ for faithful reproduction of the original template, but
+    // do NOT include it in plain[] (pdftotext will not find it on the page).
     lines.push(`  description: "${eStr(model.summary)}",`)
-    plain.push(model.summary)
   }
   lines.push('  profile-picture: none,')
   lines.push(`  date: datetime.today().display(),`)
