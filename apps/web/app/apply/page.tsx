@@ -403,19 +403,23 @@ function formatTokenCount(n: number): string {
   return String(n)
 }
 
-function CostEstimate({ promptStr, auth }: { promptStr: string; auth: import('@ghosted/core').AIAuth | null | undefined }) {
+function CostEstimate({ promptStr, auth, chosenModel }: { promptStr: string; auth: import('@ghosted/core').AIAuth | null | undefined; chosenModel?: string }) {
   const estimate = useMemo(() => {
     if (!auth) return null
     const inTokens = Math.ceil(promptStr.length / 4)
     const totalTokens = inTokens + ASSUMED_OUTPUT_TOKENS
     const isSubscription = auth.method === 'local_cli' || auth.provider === 'codex'
-    const model = modelForAuth(auth)
-    const entry = findCatalogEntry(FALLBACK_MODEL_CATALOG, auth.provider, model)
+    // Use the picker's chosen model id if available; fall back to the auth-derived model.
+    const effectiveModel = chosenModel || modelForAuth(auth)
+    // Try to find the entry from any provider (catalog may have it under 'anthropic', 'openai', or 'codex').
+    const entry =
+      findCatalogEntry(FALLBACK_MODEL_CATALOG, auth.provider, effectiveModel) ??
+      FALLBACK_MODEL_CATALOG.find((e) => e.id === effectiveModel)
     const costUSD = isSubscription ? null : estimateCostUSD(entry, promptStr.length, ASSUMED_OUTPUT_TOKENS)
-    const modelLabel = entry?.label ?? model
+    const modelLabel = entry?.label ?? effectiveModel
     const costStr = costUSD === null ? 'subscription' : `~$${costUSD < 0.01 ? costUSD.toFixed(4) : costUSD.toFixed(2)}`
     return { totalTokens, costStr, modelLabel }
-  }, [promptStr, auth])
+  }, [promptStr, auth, chosenModel])
 
   if (!estimate) return null
 
@@ -735,7 +739,7 @@ function Finale({
         opportunity_angles: result.opportunity_angles,
         standout_suggestions: result.standout_suggestions,
         generated_at: new Date().toISOString(),
-        model: auth ? modelForAuth(auth) : undefined,
+        model: chosenModel || (auth ? modelForAuth(auth) : undefined),
         revisions: (materials.revisions ?? 0) + (revisionInstruction ? 1 : 0),
       }
       await updateApplication({ ...app, materials: updated })
@@ -1133,7 +1137,7 @@ function Workspace({ app }: { app: Application }) {
         opportunity_angles: result.opportunity_angles,
         standout_suggestions: result.standout_suggestions,
         generated_at: new Date().toISOString(),
-        model: auth ? modelForAuth(auth) : undefined,
+        model: chosenModel || (auth ? modelForAuth(auth) : undefined),
         revisions: (app.materials?.revisions ?? 0) + (revisionInstruction ? 1 : 0),
       }
       await updateApplication({ ...app, materials })
@@ -1267,7 +1271,7 @@ function Workspace({ app }: { app: Application }) {
                   <p className="dim small">Start from AI suggestions, then ask for focused changes. You should not be writing from scratch.</p>
                 </div>
                 <div className="row gap" style={{ alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 }}>
-                  <CostEstimate promptStr={promptStr} auth={auth} />
+                  <CostEstimate promptStr={promptStr} auth={auth} chosenModel={chosenModel || undefined} />
                   <div className="model-picker-inline">
                     <ModelPicker />
                   </div>

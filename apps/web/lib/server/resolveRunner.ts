@@ -30,6 +30,16 @@ const MODEL_ID_RE = /^[-a-zA-Z0-9./:_]{1,100}$/
 
 const KNOWN_PROVIDERS: AIProvider[] = ['anthropic', 'openai', 'codex']
 
+/**
+ * Infer a provider from id heuristics when no catalog entry is present.
+ * Returns undefined for truly unrecognizable ids.
+ */
+function inferProviderFromId(id: string): AIProvider | undefined {
+  if (/^(anthropic\/|claude-)/i.test(id)) return 'anthropic'
+  if (/^(openai\/|gpt-|o\d|codex)/i.test(id)) return 'openai'
+  return undefined
+}
+
 export function resolveRunner(
   bodyModel: string | undefined,
   auth: AIAuth,
@@ -47,33 +57,40 @@ export function resolveRunner(
     return { runner: 'error', model: bodyModel, errorMessage: 'model id contains invalid characters' }
   }
 
-  // Unknown provider → reject.
-  if (!catalogProvider || !KNOWN_PROVIDERS.includes(catalogProvider)) {
+  // Resolve provider: prefer catalog entry; fall back to id heuristics for
+  // recognizable model ids that are absent from the catalog.
+  const effectiveProvider: AIProvider | undefined =
+    catalogProvider && KNOWN_PROVIDERS.includes(catalogProvider)
+      ? catalogProvider
+      : inferProviderFromId(bodyModel)
+
+  // Truly unrecognizable id → reject with actionable message.
+  if (!effectiveProvider) {
     return {
       runner: 'error',
       model: bodyModel,
-      errorMessage: `unknown provider for model "${bodyModel}" — cannot route request`,
+      errorMessage: `unknown provider for model "${bodyModel}" — pick a model from the list or add it to the catalog`,
     }
   }
 
-  if (catalogProvider === 'codex') {
+  if (effectiveProvider === 'codex') {
     return { runner: 'codex_cli', model: bodyModel }
   }
 
-  if (catalogProvider === 'openai') {
+  if (effectiveProvider === 'openai') {
     // Route to Codex CLI when no OpenAI key is present; else call OpenAI API directly.
     const hasKey = !!(auth.key && auth.key.length >= 24)
     return { runner: hasKey ? 'openai_api' : 'codex_cli', model: bodyModel }
   }
 
   // anthropic provider.
-  if (catalogProvider === 'anthropic') {
+  if (effectiveProvider === 'anthropic') {
     if (auth.method === 'local_cli' || !auth.key) {
       return { runner: 'claude_cli', model: bodyModel }
     }
     return { runner: 'anthropic_api', model: bodyModel }
   }
 
-  // Unreachable given the KNOWN_PROVIDERS check above, but satisfies TS.
+  // Unreachable given the effectiveProvider check above, but satisfies TS.
   return { runner: 'error', model: bodyModel, errorMessage: 'unhandled provider' }
 }

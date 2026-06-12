@@ -63,7 +63,11 @@ export function ModelPicker() {
     claudeEntries[0] ??
     openaiEntries[0]
 
-  const { model, setModel } = useModelChoice(firstRunnable?.id ?? '')
+  const allEntries = [...claudeEntries, ...openaiEntries]
+
+  // Pass all current entries to useModelChoice so it can reconcile a stale
+  // stored id against what is actually pickable today.
+  const { model, setModel } = useModelChoice(firstRunnable?.id ?? '', allEntries)
 
   const bothEmpty = claudeEntries.length === 0 && openaiEntries.length === 0
 

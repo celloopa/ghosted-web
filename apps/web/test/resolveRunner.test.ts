@@ -58,6 +58,58 @@ describe('resolveRunner', () => {
     expect(r.errorMessage).toMatch(/unknown provider/)
   })
 
+  // ── Fix A: id-heuristic fallback for recognizable but un-cataloged model ids ──
+
+  it('claude-fable-5 (no catalog entry) → heuristic → anthropic → claude_cli (local_cli auth)', () => {
+    // 'claude-fable-5' matches /^claude-/i so it falls back to the anthropic provider.
+    // With local_cli auth that resolves to claude_cli.
+    const r = resolveRunner('claude-fable-5', cliAuth, undefined, 'claude-sonnet-4-6')
+    expect(r.runner).toBe('claude_cli')
+    expect(r.model).toBe('claude-fable-5')
+  })
+
+  it('claude-fable-5 with api_key auth → heuristic → anthropic → anthropic_api', () => {
+    const r = resolveRunner('claude-fable-5', apiKeyAuth, undefined, 'claude-sonnet-4-6')
+    expect(r.runner).toBe('anthropic_api')
+    expect(r.model).toBe('claude-fable-5')
+  })
+
+  it('anthropic/claude-fable-5 (slash prefix, no catalog entry) → heuristic → anthropic → claude_cli', () => {
+    const r = resolveRunner('anthropic/claude-fable-5', cliAuth, undefined, 'claude-sonnet-4-6')
+    expect(r.runner).toBe('claude_cli')
+  })
+
+  it('gpt-99-turbo (no catalog entry) → heuristic → openai → codex_cli (no openai key)', () => {
+    const r = resolveRunner('gpt-99-turbo', cliAuth, undefined, 'claude-sonnet-4-6')
+    expect(r.runner).toBe('codex_cli')
+    expect(r.model).toBe('gpt-99-turbo')
+  })
+
+  it('gpt-99-turbo with openai key → heuristic → openai → openai_api', () => {
+    const r = resolveRunner('gpt-99-turbo', oaiKeyAuth, undefined, 'claude-sonnet-4-6')
+    expect(r.runner).toBe('openai_api')
+  })
+
+  it('o99 (matches /^o\\d/ pattern) → heuristic → openai', () => {
+    const r = resolveRunner('o99', oaiKeyAuth, undefined, 'claude-sonnet-4-6')
+    expect(r.runner).toBe('openai_api')
+  })
+
+  it('truly-unknown-id with no heuristic match → error naming the id and advising fix', () => {
+    const r = resolveRunner('totally-unknown-xyz', cliAuth, undefined, 'claude-sonnet-4-6')
+    expect(r.runner).toBe('error')
+    // Error must name the bad id
+    expect(r.errorMessage).toContain('totally-unknown-xyz')
+    // Error must tell the user how to fix it
+    expect(r.errorMessage?.toLowerCase()).toMatch(/pick a model from the list/)
+  })
+
+  it('catalog entry wins over heuristic when both are available', () => {
+    // If caller provides a catalogProvider it should be honoured over the heuristic
+    const r = resolveRunner('gpt-5-mini', cliAuth, 'codex', 'claude-sonnet-4-6')
+    expect(r.runner).toBe('codex_cli')
+  })
+
   it('model id with invalid chars → error sentinel', () => {
     const r = resolveRunner('model with spaces!', cliAuth, 'anthropic', 'claude-sonnet-4-6')
     expect(r.runner).toBe('error')
