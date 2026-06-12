@@ -990,3 +990,25 @@ a {
 .model-picker-inline p {
   display: none;
 }
+
+/* ---- questions panel ---- */
+
+.questions-panel {
+  padding: 0;
+}
+
+.questions-add-row {
+  align-items: center;
+}
+
+.questions-add-row .input {
+  flex: 1;
+}
+
+.questions-card {
+  margin-bottom: 12px;
+}
+
+.questions-card:last-child {
+  margin-bottom: 0;
+}

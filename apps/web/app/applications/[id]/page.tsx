@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import {
   isGhosted,
   needsFollowUp,
+  renderQuestionsDoc,
   type ApplicationEvent,
   type ClosedReason,
   type Status,
@@ -158,6 +159,27 @@ function DocumentsSection({ app }: { app: Application }) {
               </a>
             )
           })}
+          {/* Application Q&A */}
+          {materials.qa?.length ? (() => {
+            const questionsName = buildDownloadName(app.company, 'questions')
+            const questionsContent = renderQuestionsDoc(app.company, app.position, materials.qa)
+            return (
+              <>
+                <button
+                  className="btn btn-small"
+                  onClick={() => copy('qa', questionsContent)}
+                >
+                  {copied === 'qa' ? 'copied' : 'copy'} {questionsName}
+                </button>
+                <button
+                  className="btn btn-small"
+                  onClick={() => downloadBlob(questionsContent, questionsName)}
+                >
+                  ↓ {questionsName}
+                </button>
+              </>
+            )
+          })() : null}
         </div>
 
         {/* Re-entry CTA */}

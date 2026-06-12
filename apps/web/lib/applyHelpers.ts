@@ -6,7 +6,7 @@ import type { Application, DocStyle, ResumePlan } from '@ghosted/core'
 /** Slugify a company name for filenames: "Figma Corp" → "figma-cover-letter.md" */
 export function buildDownloadName(
   company: string,
-  kind: 'cover-letter' | 'resume-adjustments',
+  kind: 'cover-letter' | 'resume-adjustments' | 'questions',
 ): string {
   const slug =
     company

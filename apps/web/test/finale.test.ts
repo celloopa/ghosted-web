@@ -33,6 +33,14 @@ describe('buildDownloadName', () => {
   it('uses resume-adjustments kind', () => {
     expect(buildDownloadName('Linear', 'resume-adjustments')).toBe('linear-resume-adjustments.md')
   })
+
+  it('uses questions kind', () => {
+    expect(buildDownloadName('Figma', 'questions')).toBe('figma-questions.md')
+  })
+
+  it('slugifies with questions kind for multi-word company', () => {
+    expect(buildDownloadName('Stripe Inc', 'questions')).toBe('stripe-inc-questions.md')
+  })
 })
 
 // ---- defaultView ----

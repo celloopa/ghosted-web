@@ -79,6 +79,8 @@ export interface Materials {
   revisions_at_send?: number
   /** Stamped after a successful PDF export. Used to detect content-changed-since-export. */
   exported_at?: string
+  /** Application-form Q&A: the user pastes a question, the model drafts an answer. */
+  qa?: { question: string; answer: string; added_at?: string }[]
 }
 
 export interface TransitionError {

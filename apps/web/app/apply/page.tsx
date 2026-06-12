@@ -5,16 +5,20 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   analyzeFit,
+  buildAnswerPrompt,
   buildGenerationPrompt,
+  checkAnswer,
   checkCoverLetter,
   checkDraftHonesty,
   estimateCostUSD,
   findCatalogEntry,
   FALLBACK_MODEL_CATALOG,
   modelForAuth,
+  parseAnswer,
   parseGeneration,
   parsePostingHTML,
   planResume,
+  renderQuestionsDoc,
   renderResumeAdjustments,
   type Application,
   type FitReport,
@@ -30,6 +34,7 @@ import { useBaseline } from '../../lib/useBaseline'
 import { useAIAuth } from '../../lib/useAIAuth'
 import { ConnectAI } from '../../components/ConnectAI'
 import { ModelPicker } from '../../components/ModelPicker'
+import { QuestionsPanel } from '../../components/QuestionsPanel'
 import { RewritesPanel } from '../../components/RewritesPanel'
 import { StandoutsPanel } from '../../components/StandoutsPanel'
 import { todayISO } from '../../lib/dates'
@@ -595,17 +600,108 @@ function Finale({
     setTimeout(() => setCopiedKey(null), 1500)
   }
 
-  async function callModel(prompt: string) {
+  // ---- Q&A state ----
+  const [qaGenerating, setQaGenerating] = useState(false)
+  const [qaError, setQaError] = useState<string | null>(null)
+
+  async function callModelRaw(prompt: string, task: 'revision' | 'answer'): Promise<string> {
     const res = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ auth, prompt, applicationId: app.id, task: 'revision', ...(chosenModel ? { model: chosenModel } : {}) }),
+      body: JSON.stringify({ auth, prompt, applicationId: app.id, task, ...(chosenModel ? { model: chosenModel } : {}) }),
     })
     const data = (await res.json()) as { text?: string; model?: string; error?: string }
     if (!res.ok || !data.text) throw new Error(data.error ?? 'generation failed')
-    const parsed = parseGeneration(data.text)
+    return data.text
+  }
+
+  async function callModel(prompt: string) {
+    const text = await callModelRaw(prompt, 'revision')
+    const parsed = parseGeneration(text)
     if (!parsed.ok) throw new Error(parsed.error)
     return parsed
+  }
+
+  async function draftAnswer(question: string, revisionOf?: { current: string; instruction: string }) {
+    setQaError(null)
+    setQaGenerating(true)
+    try {
+      const answerInput = {
+        company: app.company,
+        position: app.position,
+        descriptionExcerpt: posting.description.slice(0, 3000),
+        cvJson,
+        voiceSamples: (baseline?.voice_samples ?? []).map((v) => v.text),
+        ...(baseline?.constraints.notes ? { constraintNotes: baseline.constraints.notes } : {}),
+      }
+      const prompt = buildAnswerPrompt(answerInput, question, revisionOf)
+      const raw = await callModelRaw(prompt, 'answer')
+      const parsed = parseAnswer(raw)
+      if (!parsed.ok) throw new Error(parsed.error)
+
+      const answer = parsed.answer
+      const check = checkAnswer(answer)
+
+      const existing = app.materials?.qa ?? []
+      // If this is a revision, find the matching question index
+      const existingIndex = revisionOf ? existing.findIndex((item) => item.question === question) : -1
+
+      let nextQa: NonNullable<Materials['qa']>
+      if (existingIndex >= 0) {
+        // Update in place
+        nextQa = existing.map((item, i) =>
+          i === existingIndex
+            ? { ...item, answer, added_at: new Date().toISOString() }
+            : item,
+        )
+      } else {
+        nextQa = [...existing, { question, answer, added_at: new Date().toISOString() }]
+      }
+
+      const updatedMaterials: Materials = { ...app.materials, qa: nextQa }
+      await updateApplication({ ...app, materials: updatedMaterials })
+
+      // Show inline warnings if the answer has issues, but don't auto-retry
+      if (check.overLimit || check.banned.length > 0) {
+        const warns: string[] = []
+        if (check.overLimit) warns.push(`answer is ${check.words} words — consider revising`)
+        if (check.banned.length > 0) warns.push(`banned phrasing: ${check.banned.join(', ')}`)
+        setQaError(warns.join(' · '))
+      }
+    } catch (e) {
+      setQaError(e instanceof Error ? e.message : 'answer generation failed')
+    } finally {
+      setQaGenerating(false)
+    }
+  }
+
+  async function reviseAnswer(index: number, instruction: string) {
+    const qa = app.materials?.qa ?? []
+    const item = qa[index]
+    if (!item) return
+    await draftAnswer(item.question, { current: item.answer, instruction })
+  }
+
+  async function editAnswer(index: number, answer: string) {
+    const qa = app.materials?.qa ?? []
+    const nextQa = qa.map((item, i) =>
+      i === index ? { ...item, answer } : item,
+    )
+    await updateApplication({ ...app, materials: { ...app.materials, qa: nextQa } })
+  }
+
+  async function removeAnswer(index: number) {
+    const qa = app.materials?.qa ?? []
+    const nextQa = qa.filter((_, i) => i !== index)
+    await updateApplication({ ...app, materials: { ...app.materials, qa: nextQa } })
+  }
+
+  function downloadQuestionsDoc() {
+    const qa = app.materials?.qa ?? []
+    if (!qa.length) return
+    const content = renderQuestionsDoc(app.company, app.position, qa)
+    const filename = buildDownloadName(app.company, 'questions')
+    downloadBlob(content, filename)
   }
 
   async function generate(revisionInstruction?: string) {
@@ -852,6 +948,21 @@ function Finale({
             )}
           </>
         )}
+      </div>
+
+      {/* Application Q&A */}
+      <div className="finale-section reveal-3">
+        {qaError && <p className="form-error" role="alert" style={{ marginBottom: 8 }}>{qaError}</p>}
+        <QuestionsPanel
+          qa={app.materials?.qa ?? []}
+          busy={qaGenerating}
+          onDraft={(question) => void draftAnswer(question)}
+          onRevise={(index, instruction) => void reviseAnswer(index, instruction)}
+          onEdit={(index, answer) => void editAnswer(index, answer)}
+          onRemove={(index) => void removeAnswer(index)}
+          onCopy={(text) => copy('qa', text)}
+          onDownloadAll={downloadQuestionsDoc}
+        />
       </div>
 
       <div className="finale-section reveal-3">
