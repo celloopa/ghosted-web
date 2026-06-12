@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   buildResumeModel,
   buildExpectations,
+  normalizeDocStyle,
   typstEscape,
   type ResumeModel,
 } from '../src/export'
@@ -74,6 +75,100 @@ const FULL_CV = JSON.stringify({
       endDate: '2019-12',
     },
   ],
+})
+
+// ── normalizeDocStyle ─────────────────────────────────────────────────────────
+
+describe('normalizeDocStyle', () => {
+  it('defaults to template=modern when input is null', () => {
+    expect(normalizeDocStyle(null)).toEqual({ template: 'modern' })
+  })
+
+  it('defaults to template=modern when input is not an object', () => {
+    expect(normalizeDocStyle('plain-ats')).toEqual({ template: 'modern' })
+    expect(normalizeDocStyle(42)).toEqual({ template: 'modern' })
+  })
+
+  it('accepts template=plain-ats', () => {
+    expect(normalizeDocStyle({ template: 'plain-ats' }).template).toBe('plain-ats')
+  })
+
+  it('defaults template to modern for unknown values', () => {
+    expect(normalizeDocStyle({ template: 'fancy' }).template).toBe('modern')
+  })
+
+  it('accepts a valid 6-digit hex accentColor', () => {
+    const s = normalizeDocStyle({ template: 'modern', accentColor: '#262F99' })
+    expect(s.accentColor).toBe('#262F99')
+  })
+
+  it('drops accentColor that does not match #RRGGBB', () => {
+    expect(normalizeDocStyle({ accentColor: 'red' }).accentColor).toBeUndefined()
+    expect(normalizeDocStyle({ accentColor: '#abc' }).accentColor).toBeUndefined()
+    expect(normalizeDocStyle({ accentColor: '#GGGGGG' }).accentColor).toBeUndefined()
+  })
+
+  it('accepts a valid font string', () => {
+    const s = normalizeDocStyle({ font: 'Source Sans Pro' })
+    expect(s.font).toBe('Source Sans Pro')
+  })
+
+  it('drops a font that contains disallowed characters', () => {
+    expect(normalizeDocStyle({ font: 'Font; injection' }).font).toBeUndefined()
+    expect(normalizeDocStyle({ font: '#bad' }).font).toBeUndefined()
+  })
+
+  it('drops a font that exceeds 60 characters', () => {
+    const longFont = 'A'.repeat(61)
+    expect(normalizeDocStyle({ font: longFont }).font).toBeUndefined()
+  })
+
+  it('accepts a 60-character font name', () => {
+    const okFont = 'A'.repeat(60)
+    expect(normalizeDocStyle({ font: okFont }).font).toBe(okFont)
+  })
+})
+
+// ── buildResumeModel — modern fields ─────────────────────────────────────────
+
+describe('buildResumeModel — modern-cv fields', () => {
+  it('splits name into firstname and lastname on last space', () => {
+    const m = buildResumeModel(FULL_CV)!
+    expect(m.modern?.firstname).toBe('Marcelo')
+    expect(m.modern?.lastname).toBe('Rondon')
+  })
+
+  it('parses github username from profile URL', () => {
+    const m = buildResumeModel(FULL_CV)!
+    expect(m.modern?.github).toBe('celloopa')
+  })
+
+  it('parses linkedin username from profile URL', () => {
+    const m = buildResumeModel(FULL_CV)!
+    expect(m.modern?.linkedin).toBe('marcelorondon')
+  })
+
+  it('sets homepage from basics.url', () => {
+    const m = buildResumeModel(FULL_CV)!
+    expect(m.modern?.homepage).toBe('https://cello.design')
+  })
+
+  it('splits positions from basics.label on " · "', () => {
+    const cv = JSON.stringify({
+      basics: {
+        name: 'Dev Person',
+        email: 'd@x.io',
+        label: 'Software Engineer · UX/UI',
+        url: 'https://dev.io',
+        profiles: [],
+      },
+      work: [],
+      skills: [],
+      education: [],
+    })
+    const m = buildResumeModel(cv)!
+    expect(m.modern?.positions).toEqual(['Software Engineer', 'UX/UI'])
+  })
 })
 
 // ── buildResumeModel ──────────────────────────────────────────────────────────

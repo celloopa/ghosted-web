@@ -1,7 +1,7 @@
 // Pure helpers used by apps/web/app/apply/page.tsx and its tests.
 // Kept in lib/ so the page can remain a Next.js page (no unexpected named exports).
 
-import type { Application, ResumePlan } from '@ghosted/core'
+import type { Application, DocStyle, ResumePlan } from '@ghosted/core'
 
 /** Slugify a company name for filenames: "Figma Corp" → "figma-cover-letter.md" */
 export function buildDownloadName(
@@ -32,16 +32,18 @@ export interface ExportPayload {
   bulletOrder: { name: string; order: number[] }[]
   skillsOrder: string[]
   matchedKeywords: string[]
+  style?: DocStyle
 }
 
 /**
- * Build the /api/export payload from app + baseline + resume plan.
+ * Build the /api/export payload from app + baseline + resume plan + optional style.
  * Pure function — no I/O, fully testable.
  */
 export function buildExportPayload(
   app: Application,
   cvJson: string,
   plan: ResumePlan,
+  style?: DocStyle,
 ): ExportPayload {
   const posting = app.posting!
   const materials = app.materials
@@ -59,6 +61,7 @@ export function buildExportPayload(
     bulletOrder,
     skillsOrder: plan.skills_order,
     matchedKeywords: posting.matched,
+    ...(style ? { style } : {}),
   }
 }
 

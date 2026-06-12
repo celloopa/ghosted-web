@@ -4,6 +4,47 @@
 
 import { keywordVariantIn } from './analyze'
 
+/**
+ * Document style preferences passed through the export pipeline.
+ * template: 'modern' uses @preview/modern-cv:0.9.0; 'plain-ats' uses the hand-rolled template.
+ * accentColor: 6-digit hex with leading #; ignored if invalid.
+ * font: font family name to inject; ≤60 chars, letters/digits/space/hyphen only.
+ */
+export interface DocStyle {
+  template: 'modern' | 'plain-ats'
+  font?: string
+  accentColor?: string
+}
+
+const ACCENT_RE = /^#[0-9a-fA-F]{6}$/
+const FONT_RE = /^[a-zA-Z0-9 -]{1,60}$/
+
+/**
+ * Coerce an unknown input into a valid DocStyle.
+ * Defaults: template → 'modern', invalid accentColor → dropped, invalid font → dropped.
+ */
+export function normalizeDocStyle(input: unknown): DocStyle {
+  if (typeof input !== 'object' || input === null) {
+    return { template: 'modern' }
+  }
+  const raw = input as Record<string, unknown>
+
+  const template: DocStyle['template'] =
+    raw.template === 'plain-ats' ? 'plain-ats' : 'modern'
+
+  const accentColor =
+    typeof raw.accentColor === 'string' && ACCENT_RE.test(raw.accentColor)
+      ? raw.accentColor
+      : undefined
+
+  const font =
+    typeof raw.font === 'string' && FONT_RE.test(raw.font.trim())
+      ? raw.font.trim()
+      : undefined
+
+  return { template, ...(accentColor ? { accentColor } : {}), ...(font ? { font } : {}) }
+}
+
 /** A single link shown in the resume header. */
 export interface ResumeLink {
   label: string
@@ -40,6 +81,15 @@ export interface ResumeModel {
   work: ResumeWorkEntry[]
   skills: string[]
   education: ResumeEducationEntry[]
+  /** Fields used only by the modern-cv template. */
+  modern?: {
+    firstname: string
+    lastname: string
+    homepage?: string
+    github?: string
+    linkedin?: string
+    positions: string[]
+  }
 }
 
 /**
@@ -258,7 +308,54 @@ export function buildResumeModel(cvJson: string, opts: BuildResumeModelOptions =
     })
   }
 
-  return { name, email, phone, location, links, summary, work, skills, education }
+  // ── modern-cv specific fields ──────────────────────────────────────────────
+  // Split name on last space: "Marcelo Rondon" → firstname "Marcelo", lastname "Rondon"
+  const nameParts = name.split(' ')
+  const lastname = nameParts.length > 1 ? nameParts[nameParts.length - 1]! : name
+  const firstname = nameParts.length > 1 ? nameParts.slice(0, -1).join(' ') : ''
+
+  // Homepage: basics.url
+  const homepage = websiteUrl ?? undefined
+
+  // Github/LinkedIn: parse from profiles
+  let github: string | undefined
+  let linkedin: string | undefined
+  for (const p of profiles) {
+    if (typeof p !== 'object' || p === null) continue
+    const prof = p as Record<string, unknown>
+    const pUrl = str(prof.url) ?? ''
+    const username = str(prof.username)
+    const network = (str(prof.network) ?? '').toLowerCase()
+    // GitHub
+    if (!github) {
+      const ghMatch = pUrl.match(/github\.com\/([^/?\s]+)/)
+      if (ghMatch) github = ghMatch[1]
+      else if (network === 'github' && username) github = username
+    }
+    // LinkedIn
+    if (!linkedin) {
+      const liMatch = pUrl.match(/linkedin\.com\/in\/([^/?\s]+)/)
+      if (liMatch) linkedin = liMatch[1]
+      else if (network === 'linkedin' && username) linkedin = username
+    }
+  }
+
+  // Positions: from basics.label, split on ' · ' or fall back to single entry
+  const labelStr = str(basics.label as unknown)
+  const positions: string[] = labelStr
+    ? labelStr.split(/\s*·\s*/).filter(Boolean)
+    : []
+
+  const modern = {
+    firstname,
+    lastname,
+    ...(homepage ? { homepage } : {}),
+    ...(github ? { github } : {}),
+    ...(linkedin ? { linkedin } : {}),
+    positions,
+  }
+
+  return { name, email, phone, location, links, summary, work, skills, education, modern }
 }
 
 /**

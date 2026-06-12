@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Suspense, useCallback, useMemo, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   analyzeFit,
   buildGenerationPrompt,
@@ -35,6 +35,7 @@ import { StandoutsPanel } from '../../components/StandoutsPanel'
 import { todayISO } from '../../lib/dates'
 import { buildDownloadName, buildExportPayload, defaultView, finaleActions, isStaleExport, type WorkspaceView } from '../../lib/applyHelpers'
 import { useModelChoice } from '../../lib/useModelChoice'
+import { useDocStyle, DEFAULT_ACCENT_COLOR } from '../../lib/useDocStyle'
 
 // The apply workspace. Minimum viable intelligence: everything on this page
 // is deterministic — fetch, parse, keywords, fit, bullet order, validation —
@@ -530,6 +531,7 @@ function Finale({
   const { baseline } = useBaseline()
   const { auth } = useAIAuth()
   const { model: chosenModel } = useModelChoice()
+  const { style, setTemplate, setFont, setAccentColor } = useDocStyle()
   const router = useRouter()
 
   const posting = app.posting!
@@ -571,6 +573,19 @@ function Finale({
   const [exportResult, setExportResult] = useState<ExportResult | null>(null)
   const [exportedAt, setExportedAt] = useState<string | undefined>(undefined)
   const staleExport = isStaleExport(exportedAt, materials.generated_at)
+
+  // Available fonts from typst
+  const [availableFonts, setAvailableFonts] = useState<string[]>([])
+  // Fetch font list once on mount (useEffect is already imported)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    void fetch('/api/fonts')
+      .then((r) => r.json())
+      .then((d: { fonts?: string[] }) => {
+        if (Array.isArray(d.fonts)) setAvailableFonts(d.fonts)
+      })
+      .catch(() => undefined)
+  }, [])
 
   const actions = finaleActions(app.status)
 
@@ -641,7 +656,7 @@ function Finale({
     setExportError(null)
     setExporting(true)
     try {
-      const payload = buildExportPayload(app, cvJson, plan)
+      const payload = buildExportPayload(app, cvJson, plan, style)
       const res = await fetch('/api/export', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -757,6 +772,50 @@ function Finale({
           <p className="dim small export-no-cv">PDF export needs a CV — add your CV in onboarding first.</p>
         ) : (
           <>
+            {/* Document style row */}
+            <div className="doc-style-row row gap" style={{ flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+              <div className="field" style={{ margin: 0 }}>
+                <label className="field-label" style={{ fontSize: 12 }}>Template</label>
+                <select
+                  className="input"
+                  style={{ padding: '4px 8px', fontSize: 13 }}
+                  value={style.template}
+                  onChange={(e) => setTemplate(e.target.value as 'modern' | 'plain-ats')}
+                >
+                  <option value="modern">Modern CV — your real template</option>
+                  <option value="plain-ats">Plain ATS</option>
+                </select>
+              </div>
+              <div className="field" style={{ margin: 0 }}>
+                <label className="field-label" style={{ fontSize: 12 }}>Font</label>
+                <select
+                  className="input"
+                  style={{ padding: '4px 8px', fontSize: 13 }}
+                  value={style.font ?? ''}
+                  onChange={(e) => setFont(e.target.value || undefined)}
+                >
+                  <option value="">Template default</option>
+                  {availableFonts.map((f) => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+              </div>
+              {style.template === 'modern' && (
+                <div className="field" style={{ margin: 0 }}>
+                  <label className="field-label" style={{ fontSize: 12 }}>Accent</label>
+                  <input
+                    type="color"
+                    style={{ width: 36, height: 32, padding: 2, border: '1px solid var(--border-subtle)', borderRadius: 6, cursor: 'pointer' }}
+                    value={style.accentColor ?? DEFAULT_ACCENT_COLOR}
+                    onChange={(e) => setAccentColor(e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
+            <p className="dim small" style={{ margin: '0 0 10px', fontSize: 12 }}>
+              Every export is still ATS-checked — style never beats extraction.
+            </p>
+
             <div className="row gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
               <button
                 className="btn btn-progress"

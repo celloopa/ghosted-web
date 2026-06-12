@@ -10,7 +10,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import type { ResumeModel, AtsExpectations } from '@ghosted/core'
+import type { ResumeModel, AtsExpectations, DocStyle } from '@ghosted/core'
 import { typstEscape } from '@ghosted/core'
 
 const execFile = promisify(_execFile)
@@ -20,10 +20,13 @@ const execFile = promisify(_execFile)
 // ─────────────────────────────────────────────────────────────────────────────
 
 function hardenedEnv(): NodeJS.ProcessEnv {
-  const extraPaths = [`${homedir()}/.local/bin`, '/opt/homebrew/bin', '/usr/local/bin'].join(':')
+  const home = homedir()
+  const extraPaths = [`${home}/.local/bin`, '/opt/homebrew/bin', '/usr/local/bin'].join(':')
   return {
     ...process.env,
     PATH: `${process.env.PATH ?? ''}:${extraPaths}`,
+    // Ensure typst can locate its package cache (HOME may be missing in some server envs)
+    HOME: process.env.HOME ?? home,
   }
 }
 
@@ -36,8 +39,21 @@ const WEB_CWD = process.cwd()
 // Typst document generators
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Full content-mode escape (for use inside Typst content brackets [...]) */
 function e(s: string): string {
   return typstEscape(s)
+}
+
+/**
+ * String-literal escape for Typst dict values passed to the modern-cv author block.
+ * Inside a Typst string literal "...", only backslash and double-quote need escaping.
+ * @ is safe in string context — typstEscape's \@ would become a literal backslash-at
+ * which breaks mailto links in the modern-cv template.
+ */
+function eStr(s: string): string {
+  return s
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
 }
 
 /** Format a start/end year pair for display. endDate empty string → "Present". */
@@ -47,6 +63,131 @@ function fmtDates(start?: string, end?: string): string {
   return s ? `${s} – ${en}` : en
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Modern-CV template generator (@preview/modern-cv:0.9.0)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Build a modern-cv resume document mirroring the originals exactly.
+ * The package's knobs (from lib.typ source):
+ *   accent-color: color (accepts string → rgb() internally in 0.9.0)
+ *   font: array of font families (default: "Source Sans Pro", "Source Sans 3")
+ *   header-font: string (default: "Roboto")
+ *   colored-headers: bool
+ *   show-footer: bool
+ *   show-address-icon: bool
+ *   paper-size: string
+ *
+ * Style injection:
+ *   accentColor → accent-color param (0.9.0 accepts hex strings directly)
+ *   font → font param as first family with package default as fallback,
+ *          PLUS a post-show #set text() override so body text uses the choice.
+ */
+function generateModernResumeTyp(model: ResumeModel, style: DocStyle): string {
+  const lines: string[] = []
+  const m = model.modern
+
+  // Use eStr (string-literal escape) for all author dict values: @ is safe in Typst
+  // string context but typstEscape's \@ would break mailto links in modern-cv.
+  const firstname = m ? eStr(m.firstname) : eStr(model.name.split(' ').slice(0, -1).join(' ') || model.name)
+  const lastname = m ? eStr(m.lastname) : eStr(model.name.split(' ').slice(-1)[0] ?? model.name)
+
+  lines.push('#import "@preview/modern-cv:0.9.0": *')
+  lines.push('')
+  lines.push('#show: resume.with(')
+  lines.push('  author: (')
+  lines.push(`    firstname: "${firstname}",`)
+  lines.push(`    lastname: "${lastname}",`)
+  lines.push(`    email: "${eStr(model.email)}",`)
+  if (m?.homepage) lines.push(`    homepage: "${eStr(m.homepage)}",`)
+  if (model.phone) lines.push(`    phone: "${eStr(model.phone)}",`)
+  if (m?.github) lines.push(`    github: "${eStr(m.github)}",`)
+  if (m?.linkedin) lines.push(`    linkedin: "${eStr(m.linkedin)}",`)
+  if (model.location) lines.push(`    address: "${eStr(model.location)}",`)
+  if (m?.positions && m.positions.length > 0) {
+    lines.push('    positions: (')
+    for (const pos of m.positions) {
+      lines.push(`      "${eStr(pos)}",`)
+    }
+    lines.push('    ),')
+  }
+  lines.push('  ),')
+  if (model.summary) {
+    lines.push(`  description: "${eStr(model.summary)}",`)
+  }
+  lines.push('  profile-picture: none,')
+  lines.push(`  date: datetime.today().display(),`)
+  lines.push('  language: "en",')
+  lines.push('  colored-headers: true,')
+  lines.push('  show-footer: false,')
+  lines.push('  show-address-icon: true,')
+  lines.push('  paper-size: "us-letter",')
+  // accent-color: 0.9.0 accepts a hex string and converts it internally via rgb()
+  if (style.accentColor) {
+    lines.push(`  accent-color: "${style.accentColor}",`)
+  }
+  // font: inject user choice as primary, keep package defaults as fallback
+  if (style.font) {
+    lines.push(`  font: ("${eStr(style.font)}", "Source Sans Pro", "Source Sans 3"),`)
+  }
+  lines.push(')')
+  lines.push('')
+
+  // ── EXPERIENCE ──
+  lines.push('= Experience')
+  lines.push('')
+  for (const w of model.work) {
+    if (w.highlights.length === 0) continue
+    const dates = fmtDates(w.start, w.end)
+    // resume-entry args are Typst string literals — use eStr (@ safe in strings)
+    lines.push('#resume-entry(')
+    lines.push(`  title: "${eStr(w.position ?? w.name)}",`)
+    lines.push(`  location: "",`)
+    lines.push(`  date: "${eStr(dates)}",`)
+    lines.push(`  description: "${eStr(w.name)}",`)
+    lines.push(')')
+    lines.push('')
+    // resume-item content is in [...] (content mode) — use e() for full escaping
+    lines.push('#resume-item[')
+    for (const h of w.highlights) {
+      lines.push(`  - ${e(h)}`)
+    }
+    lines.push(']')
+    lines.push('')
+  }
+
+  // ── SKILLS ──
+  lines.push('= Skills')
+  lines.push('')
+  if (model.skills.length > 0) {
+    // resume-skill-item args are string literals — use eStr
+    const skillItems = model.skills.map((s) => `"${eStr(s)}"`).join(', ')
+    lines.push(`#resume-skill-item("Skills", (${skillItems}))`)
+  }
+  lines.push('')
+
+  // ── EDUCATION ──
+  lines.push('= Education')
+  lines.push('')
+  for (const edu of model.education) {
+    const yearPart = edu.year ? ` (${edu.year})` : ''
+    const area = edu.area ? `${eStr(edu.area)}${yearPart}` : yearPart
+    lines.push('#resume-entry(')
+    lines.push(`  title: "${eStr(edu.institution)}",`)
+    lines.push(`  location: "",`)
+    lines.push(`  date: "${yearPart.replace(/[()]/g, '').trim()}",`)
+    lines.push(`  description: "${area}",`)
+    lines.push(')')
+    lines.push('')
+  }
+
+  return lines.join('\n')
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Plain-ATS template generator (original hand-rolled)
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * Produce a complete Typst resume document from a ResumeModel.
  * Preserves all ATS-safe properties from the vendored template:
@@ -55,13 +196,14 @@ function fmtDates(start?: string, end?: string): string {
  *   - hyphenate: false
  *   - headings "Experience", "Skills", "Education" in that exact order
  */
-export function generateResumeTyp(model: ResumeModel): string {
+function generatePlainResumeTyp(model: ResumeModel, style: DocStyle): string {
   const lines: string[] = []
 
   // Page and text settings — must match the vendored template's ATS-safe settings
   // Slightly tighter margins + smaller font to keep the full CV within 2 pages.
+  const fontFamily = style.font ? `"${e(style.font)}", "Libertinus Serif"` : '"Libertinus Serif"'
   lines.push('#set page(paper: "us-letter", margin: (x: 0.65in, y: 0.55in))')
-  lines.push('#set text(font: "Libertinus Serif", size: 9.5pt, ligatures: false, hyphenate: false)')
+  lines.push(`#set text(font: (${fontFamily}), size: 9.5pt, ligatures: false, hyphenate: false)`)
   lines.push('#set par(justify: false, leading: 0.45em)')
   lines.push('')
 
@@ -151,6 +293,15 @@ export function generateResumeTyp(model: ResumeModel): string {
   return lines.join('\n')
 }
 
+/**
+ * Produce a complete Typst resume document from a ResumeModel.
+ * Routes to the modern-cv or plain-ATS template based on style.template.
+ */
+export function generateResumeTyp(model: ResumeModel, style: DocStyle = { template: 'modern' }): string {
+  if (style.template === 'modern') return generateModernResumeTyp(model, style)
+  return generatePlainResumeTyp(model, style)
+}
+
 export interface CoverLetterInput {
   name: string
   email: string
@@ -160,15 +311,67 @@ export interface CoverLetterInput {
   body: string
 }
 
-/**
- * Produce a minimal single-column Typst cover letter document.
- * ATS-safe: single column, no tables, ligatures off, hyphenate off.
- */
-export function generateCoverLetterTyp(input: CoverLetterInput): string {
+// ─────────────────────────────────────────────────────────────────────────────
+// Cover letter generators
+// ─────────────────────────────────────────────────────────────────────────────
+
+function generateModernCoverLetterTyp(input: CoverLetterInput, style: DocStyle): string {
   const lines: string[] = []
+  const nameParts = input.name.split(' ')
+  const lastname = nameParts.length > 1 ? nameParts[nameParts.length - 1]! : input.name
+  const firstname = nameParts.length > 1 ? nameParts.slice(0, -1).join(' ') : ''
+
+  lines.push('#import "@preview/modern-cv:0.9.0": *')
+  lines.push('')
+  lines.push('#show: coverletter.with(')
+  lines.push('  author: (')
+  lines.push(`    firstname: "${eStr(firstname)}",`)
+  lines.push(`    lastname: "${eStr(lastname)}",`)
+  lines.push(`    email: "${eStr(input.email)}",`)
+  // positions is required by lib.typ line 727 — supply empty tuple rather than omitting
+  lines.push('    positions: (),')
+  lines.push('  ),')
+  lines.push('  profile-picture: none,')
+  lines.push('  language: "en",')
+  if (style.accentColor) {
+    lines.push(`  accent-color: "${style.accentColor}",`)
+  }
+  if (style.font) {
+    lines.push(`  font: ("${eStr(style.font)}", "Source Sans Pro", "Source Sans 3"),`)
+  }
+  lines.push('  show-footer: false,')
+  lines.push(')')
+  lines.push('')
+
+  lines.push('#hiring-entity-info(')
+  lines.push('  entity-info: (')
+  lines.push(`    target: "Hiring Team",`)
+  lines.push(`    name: "${eStr(input.company)}",`)
+  lines.push('    street-address: "",')
+  lines.push('    city: "",')
+  lines.push('  ),')
+  lines.push(')')
+  lines.push('')
+  lines.push(`#letter-heading(job-position: "${eStr(input.position)}", addressee: "Hiring Team")`)
+  lines.push('')
+
+  const paragraphs = input.body.split(/\n\n+/).map((p) => p.trim()).filter(Boolean)
+  for (const para of paragraphs) {
+    lines.push('#coverletter-content[')
+    lines.push(`  ${e(para)}`)
+    lines.push(']')
+    lines.push('')
+  }
+
+  return lines.join('\n')
+}
+
+function generatePlainCoverLetterTyp(input: CoverLetterInput, style: DocStyle): string {
+  const lines: string[] = []
+  const fontFamily = style.font ? `"${e(style.font)}", "Libertinus Serif"` : '"Libertinus Serif"'
 
   lines.push('#set page(paper: "us-letter", margin: (x: 1in, y: 0.65in))')
-  lines.push('#set text(font: "Libertinus Serif", size: 10pt, ligatures: false, hyphenate: false)')
+  lines.push(`#set text(font: (${fontFamily}), size: 10pt, ligatures: false, hyphenate: false)`)
   lines.push('#set par(justify: false, leading: 0.55em)')
   lines.push('')
 
@@ -180,13 +383,21 @@ export function generateCoverLetterTyp(input: CoverLetterInput): string {
   // Body: split paragraphs by double newline and render each
   const paragraphs = input.body.split(/\n\n+/).map((p) => p.trim()).filter(Boolean)
   for (const para of paragraphs) {
-    // Typst requires raw content or string; use content mode for the paragraph
-    // by emitting it as a bare string literal after a par reset
     lines.push(`#par["${e(para)}"]`)
     lines.push('#v(6pt)')
   }
 
   return lines.join('\n')
+}
+
+/**
+ * Produce a Typst cover letter document.
+ * Routes to modern-cv or plain-ATS based on style.template.
+ * ATS-safe in both modes: no tables, ligatures off (plain), hyphenate off (plain).
+ */
+export function generateCoverLetterTyp(input: CoverLetterInput, style: DocStyle = { template: 'modern' }): string {
+  if (style.template === 'modern') return generateModernCoverLetterTyp(input, style)
+  return generatePlainCoverLetterTyp(input, style)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -198,6 +409,7 @@ export interface RunExportInput {
   resumeModel: ResumeModel
   coverLetter: string
   expectations: AtsExpectations
+  style?: DocStyle
 }
 
 export interface AtsResult {
@@ -229,15 +441,17 @@ export async function runExport(input: RunExportInput): Promise<ExportResult> {
   // Path to the ATS validator (relative to web app cwd)
   const validatorPath = resolve(WEB_CWD, 'tools', 'ats', 'validate_ats.py')
 
+  const style: DocStyle = input.style ?? { template: 'modern' }
+
   // Write source files
-  const resumeTyp = generateResumeTyp(input.resumeModel)
+  const resumeTyp = generateResumeTyp(input.resumeModel, style)
   const coverTyp = generateCoverLetterTyp({
     name: input.resumeModel.name,
     email: input.resumeModel.email,
     company: 'Company', // cover letter body already has the company name
     position: 'Position',
     body: input.coverLetter,
-  })
+  }, style)
 
   await Promise.all([
     writeFile(resumeTypPath, resumeTyp, 'utf8'),

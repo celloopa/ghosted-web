@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { buildResumeModel, buildExpectations } from '@ghosted/core'
+import { buildResumeModel, buildExpectations, normalizeDocStyle } from '@ghosted/core'
 import { runExport } from '../../../lib/server/typstExport'
 
 // Keep the connection alive long enough for two typst compiles + ATS runs.
@@ -15,6 +15,7 @@ interface ExportBody {
   bulletOrder?: unknown
   skillsOrder?: unknown
   matchedKeywords?: unknown
+  style?: unknown
 }
 
 export async function POST(req: NextRequest) {
@@ -65,6 +66,8 @@ export async function POST(req: NextRequest) {
 
   // ── Run export ────────────────────────────────────────────────────────────
 
+  const style = normalizeDocStyle(body.style)
+
   const started = Date.now()
   try {
     const result = await runExport({
@@ -72,6 +75,7 @@ export async function POST(req: NextRequest) {
       resumeModel,
       coverLetter: body.coverLetter,
       expectations,
+      style,
     })
 
     const ms = Date.now() - started
