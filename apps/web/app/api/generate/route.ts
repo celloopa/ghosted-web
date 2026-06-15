@@ -4,9 +4,11 @@ import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir, homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { FALLBACK_MODEL_CATALOG, findCatalogEntry, modelForAuth, validateAIAuth, type AIAuth, type GenerationRunRecord } from '@ghosted/core'
+import { FALLBACK_MODEL_CATALOG, findCatalogEntry, modelForAuth, type AIAuth, type GenerationRunRecord } from '@ghosted/core'
 import { recordGenerationRun } from '../../../lib/server/generationTelemetry'
 import { resolveRunner } from '../../../lib/server/resolveRunner'
+import { resolveConnection } from '../../../lib/server/houseConnection'
+import { checkAndIncrement } from '../../../lib/server/genCap'
 
 // Runs the ONE bounded generation prompt through whichever local connection
 // the user picked. Local-only today: credentials arrive with the request from
@@ -56,13 +58,39 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: 'invalid request body' }, { status: 400 })
   }
-  const { auth, prompt } = body
+  const { auth: requestAuth, prompt } = body
   if (!prompt || prompt.length < 50) return NextResponse.json({ error: 'missing prompt' }, { status: 400 })
   if (prompt.length > 200_000) return NextResponse.json({ error: 'prompt too large' }, { status: 400 })
-  if (!auth) return NextResponse.json({ error: 'no AI connection — connect one in Settings' }, { status: 400 })
 
-  const valid = validateAIAuth(auth)
-  if (!valid.ok) return NextResponse.json({ error: valid.message }, { status: 400 })
+  // Resolve which auth to use: caller-supplied or the house account fallback.
+  const resolved = resolveConnection(requestAuth)
+  if ('error' in resolved) {
+    return NextResponse.json({ error: resolved.error }, { status: 400 })
+  }
+  const { auth, usingHouse } = resolved
+
+  // Apply the per-session daily cap only when using the house account.
+  if (usingHouse) {
+    const limit = Number(process.env.GHOSTED_GEN_DAILY_CAP ?? 30)
+    // Derive a session id from the 'ghosted_sid' cookie, creating it if absent.
+    const existingSid = req.cookies.get('ghosted_sid')?.value
+    const sessionId = existingSid ?? randomUUID()
+
+    const cap = await checkAndIncrement(sessionId, limit)
+    if (!cap.ok) {
+      const res = NextResponse.json(
+        { error: 'Daily limit reached on the shared account — connect your own AI in Settings to keep going, or try tomorrow.' },
+        { status: 429 },
+      )
+      // Ensure the sid cookie is set even on 429 so the user doesn't get a
+      // fresh counter on the very next request.
+      if (!existingSid) {
+        res.cookies.set('ghosted_sid', sessionId, { httpOnly: true, sameSite: 'lax', path: '/' })
+      }
+      return res
+    }
+    // Will attach the sid cookie to the success response below.
+  }
 
   const legacyModel = modelForAuth(auth)
   // Resolve which runner + effective model to use.
@@ -72,25 +100,25 @@ export async function POST(req: NextRequest) {
       findCatalogEntry(FALLBACK_MODEL_CATALOG, 'openai', bodyModel)?.provider ??
       findCatalogEntry(FALLBACK_MODEL_CATALOG, 'codex', bodyModel)?.provider
     : undefined
-  const resolved = resolveRunner(bodyModel, auth, catalogProvider, legacyModel)
-  if (resolved.runner === 'error') {
-    return NextResponse.json({ error: resolved.errorMessage ?? 'invalid model' }, { status: 400 })
+  const runnerResult = resolveRunner(bodyModel, auth, catalogProvider, legacyModel)
+  if (runnerResult.runner === 'error') {
+    return NextResponse.json({ error: runnerResult.errorMessage ?? 'invalid model' }, { status: 400 })
   }
-  const model = resolved.model
+  const model = runnerResult.model
   const started = Date.now()
   try {
     let text: string
     let usage: unknown = null
 
-    if (resolved.runner === 'codex_cli') {
+    if (runnerResult.runner === 'codex_cli') {
       text = await runCodexCLI(prompt, model)
-    } else if (resolved.runner === 'claude_cli') {
+    } else if (runnerResult.runner === 'claude_cli') {
       text = await runClaudeCLI(prompt, model)
-    } else if (resolved.runner === 'anthropic_api') {
+    } else if (runnerResult.runner === 'anthropic_api') {
       const result = await callAnthropic(prompt, auth, model)
       text = result.text
       usage = result.usage
-    } else if (resolved.runner === 'openai_api') {
+    } else if (runnerResult.runner === 'openai_api') {
       const result = await callOpenAI(prompt, auth, model)
       text = result.text
       usage = result.usage
@@ -119,14 +147,23 @@ export async function POST(req: NextRequest) {
       rawUsage: usage,
       started,
       ok: true,
+      usingHouse,
       ...(body.applicationId ? { applicationId: body.applicationId } : {}),
       ...(body.task ? { task: body.task } : {}),
     })
-    console.log(JSON.stringify({ kind: 'generate', run }))
-    return NextResponse.json({ text, model, run })
+    console.log(JSON.stringify({ kind: 'generate', usingHouse, run }))
+    const successRes = NextResponse.json({ text, model, run })
+    // Persist the session id cookie when using the house account.
+    if (usingHouse) {
+      const existingSid = req.cookies.get('ghosted_sid')?.value
+      if (!existingSid) {
+        successRes.cookies.set('ghosted_sid', randomUUID(), { httpOnly: true, sameSite: 'lax', path: '/' })
+      }
+    }
+    return successRes
   } catch (e) {
     const message = e instanceof Error ? e.message : 'generation failed'
-    await recordGenerationRun({ auth, model, prompt, text: '', rawUsage: null, started, ok: false, error: message }).catch(() => undefined)
+    await recordGenerationRun({ auth, model, prompt, text: '', rawUsage: null, started, ok: false, usingHouse, error: message }).catch(() => undefined)
     console.log(JSON.stringify({ kind: 'generate_error', method: auth.method, provider: auth.provider, model, ms: Date.now() - started, message }))
     return NextResponse.json({ error: message }, { status: 502 })
   }

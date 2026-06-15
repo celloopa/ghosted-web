@@ -68,6 +68,8 @@ export async function recordGenerationRun(args: {
   error?: string
   applicationId?: string
   task?: GenerationRunRecord['task']
+  /** True when the run used the server-side house account (owner's subscription). */
+  usingHouse?: boolean
 }): Promise<GenerationRunRecord> {
   const parsedUsage = usageFromProvider(args.rawUsage, args.prompt, args.text)
   const entry = findCatalogEntry(FALLBACK_MODEL_CATALOG, args.auth.provider, args.model)
@@ -89,7 +91,10 @@ export async function recordGenerationRun(args: {
     ...(args.applicationId ? { applicationId: args.applicationId } : {}),
   }
   await mkdir(DATA_DIR, { recursive: true })
-  await appendFile(RUNS_PATH, `${JSON.stringify(record)}\n`, 'utf8')
+  // Append usingHouse to the log line (not part of GenerationRunRecord core type).
+  const logLine =
+    args.usingHouse != null ? { ...record, usingHouse: args.usingHouse } : record
+  await appendFile(RUNS_PATH, `${JSON.stringify(logLine)}\n`, 'utf8')
   return record
 }
 

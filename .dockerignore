@@ -1,0 +1,38 @@
+# Dependencies — reinstalled inside the builder stage.
+node_modules
+apps/*/node_modules
+packages/*/node_modules
+
+# Build artifacts — produced inside the builder stage.
+.next
+apps/*/.next
+
+# Runtime data — must not leak into the image; mount a volume instead.
+.ghosted-local
+apps/*/.ghosted-local
+
+# Version control.
+.git
+.gitignore
+
+# Editor / OS noise.
+.DS_Store
+*.swp
+*.swo
+
+# Test and dev-only files that don't belong in production.
+**/*.test.ts
+**/*.test.tsx
+**/vitest.config.ts
+**/test/
+
+# CI / tooling configs.
+.claude
+supabase
+docs
+README.md
+
+# Local env overrides — secrets must come from Coolify env vars, not files.
+.env
+.env.*
+*.local
