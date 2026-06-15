@@ -1,5 +1,6 @@
 import type { BaselineConstraints } from './baseline'
-import type { RoleType } from './types'
+import type { RoleType, KnownRoleType } from './types'
+import { KNOWN_ROLE_TYPES } from './types'
 import type { PostingFacts } from './posting'
 
 // Keyword extraction and fit scoring are pure code. The lexicon covers the
@@ -86,6 +87,47 @@ const LEXICON: LexiconEntry[] = [
   { term: 'WordPress', aliases: ['wordpress'] },
   { term: 'Shopify', aliases: ['shopify'] },
   { term: 'CMS', aliases: ['cms', 'contentful', 'sanity', 'payload'] },
+  // ── cross-functional / general-professional ───────────────────────────────
+  { term: 'Communication', aliases: ['communication skills', 'written communication', 'verbal communication'] },
+  { term: 'Customer Service', aliases: ['customer service', 'customer support', 'client support'] },
+  { term: 'Customer Support', aliases: ['technical support', 'help desk', 'support tickets'] },
+  { term: 'Project Management', aliases: ['project management', 'project manager'] },
+  { term: 'Program Management', aliases: ['program management', 'program manager'] },
+  { term: 'Leadership', aliases: ['leadership', 'team leadership', 'people management'] },
+  { term: 'Team Management', aliases: ['team management', 'managing a team', 'direct reports'] },
+  { term: 'Scheduling', aliases: ['scheduling', 'calendar management', 'appointment setting'] },
+  { term: 'Microsoft Office', aliases: ['microsoft office', 'office 365', 'microsoft 365'] },
+  { term: 'Excel', aliases: ['microsoft excel', 'excel spreadsheet', 'spreadsheets'] },
+  { term: 'Word', aliases: ['microsoft word'] },
+  { term: 'PowerPoint', aliases: ['powerpoint', 'microsoft powerpoint'] },
+  { term: 'Outlook', aliases: ['microsoft outlook'] },
+  { term: 'Google Workspace', aliases: ['google workspace', 'google docs', 'google sheets', 'google slides', 'gsuite', 'g suite'] },
+  { term: 'CRM', aliases: ['crm', 'customer relationship management'] },
+  { term: 'Salesforce', aliases: ['salesforce'] },
+  { term: 'HubSpot', aliases: ['hubspot'] },
+  { term: 'Data Entry', aliases: ['data entry', 'data input'] },
+  { term: 'Bookkeeping', aliases: ['bookkeeping', 'accounts payable', 'accounts receivable'] },
+  { term: 'Accounting', aliases: ['accounting', 'general ledger', 'financial reporting'] },
+  { term: 'QuickBooks', aliases: ['quickbooks'] },
+  { term: 'Inventory Management', aliases: ['inventory management', 'stock management', 'inventory control'] },
+  { term: 'Sales', aliases: ['sales experience', 'inside sales', 'outside sales', 'quota'] },
+  { term: 'Account Management', aliases: ['account management', 'account manager', 'client relationship'] },
+  { term: 'Social Media', aliases: ['social media', 'instagram', 'linkedin', 'twitter', 'facebook', 'tiktok'] },
+  { term: 'Email Marketing', aliases: ['email marketing', 'email campaigns', 'newsletter'] },
+  { term: 'Content Writing', aliases: ['content writing', 'content creation', 'blog writing'] },
+  { term: 'Copywriting', aliases: ['copywriting', 'copy writing'] },
+  { term: 'Editing', aliases: ['editing', 'proofreading', 'copy editing'] },
+  { term: 'Patient Care', aliases: ['patient care', 'patient management', 'bedside manner'] },
+  { term: 'Medical Records', aliases: ['medical records', 'ehr', 'emr', 'electronic health records'] },
+  { term: 'Bilingual', aliases: ['bilingual', 'fluent in spanish', 'spanish speaker', 'bilingual spanish'] },
+  { term: 'Time Management', aliases: ['time management', 'prioritization', 'multi-tasking', 'multitasking'] },
+  { term: 'Problem Solving', aliases: ['problem solving', 'problem-solving', 'critical thinking', 'analytical skills'] },
+  { term: 'Conflict Resolution', aliases: ['conflict resolution', 'de-escalation', 'dispute resolution'] },
+  { term: 'Onboarding', aliases: ['onboarding', 'new hire training', 'employee training'] },
+  { term: 'Public Speaking', aliases: ['public speaking', 'presentations', 'facilitation'] },
+  { term: 'Event Planning', aliases: ['event planning', 'event management', 'event coordination'] },
+  { term: 'Budgeting', aliases: ['budgeting', 'budget management', 'cost control', 'financial planning'] },
+  { term: 'Vendor Management', aliases: ['vendor management', 'supplier management', 'procurement'] },
 ]
 
 /**
@@ -148,19 +190,51 @@ export function extractKeywords(text: string, cvJson?: string): KeywordAnalysis 
 
 export interface FitReport {
   score: number // 0-100
-  role_type_guess: RoleType
+  role_type_guess: KnownRoleType
   matched: string[]
   missing: string[]
   notes: string[]
 }
 
-const ROLE_PATTERNS: { role: RoleType; re: RegExp }[] = [
-  { role: 'design_engineer', re: /design (engineer|technolog)|ux engineer|ui engineer|creative technolog|design systems? engineer/i },
-  { role: 'product_designer', re: /product design|ux design|interaction design|experience design|ui\/ux|ux\/ui|staff designer|senior designer/i },
-  { role: 'brand_motion', re: /brand|motion|graphic design|visual design|art director/i },
+const ROLE_PATTERNS: { role: KnownRoleType; re: RegExp }[] = [
+  // Design sub-roles (checked before the broad 'design' bucket)
+  { role: 'design', re: /design (engineer|technolog)|ux engineer|ui engineer|creative technolog|design systems? engineer/i },
+  { role: 'design', re: /product design|ux design|interaction design|experience design|ui\/ux|ux\/ui|staff designer|senior designer/i },
+  { role: 'design', re: /brand|motion design|graphic design|visual design|art director|motion graphic/i },
+  // Software engineering
+  { role: 'software_engineering', re: /software engineer|software developer|frontend engineer|backend engineer|full.?stack engineer|full.?stack developer|fullstack|web developer|ios developer|android developer|mobile developer|devops|site reliability|sre|platform engineer|infrastructure engineer/i },
+  // Product management
+  { role: 'product', re: /product manager|program manager|product owner|head of product|vp of product|growth product/i },
+  // Data
+  { role: 'data', re: /data (scientist|analyst|engineer|architect)|machine learning|ml engineer|bi analyst|business intelligence|analytics engineer/i },
+  // Marketing
+  { role: 'marketing', re: /marketing manager|marketing coordinator|growth manager|seo manager|content marketing|demand generation|brand manager|social media manager|digital marketing|email marketing manager/i },
+  // Sales
+  { role: 'sales', re: /account executive|sales (representative|rep|manager|director|associate)|business development|bdr|sdr|solutions engineer|sales engineer|inside sales|outside sales/i },
+  // Customer service
+  { role: 'customer_service', re: /customer (service|support|success|care)|client success|support specialist|support agent|call center|help desk|service desk/i },
+  // Project management
+  { role: 'project_management', re: /project manager|project coordinator|scrum master|agile coach|pmo|delivery manager/i },
+  // Finance & accounting
+  { role: 'finance', re: /accountant|financial analyst|controller|bookkeeper|finance manager|cfo|treasurer|payroll|accounts payable|accounts receivable/i },
+  // Healthcare
+  { role: 'healthcare', re: /nurse|nursing|medical assistant|patient (coordinator|care|advocate)|clinical|phlebotomist|pharmacy|health (coach|educator)|care manager|caregiver/i },
+  // Education
+  { role: 'education', re: /teacher|instructor|educator|tutor|professor|curriculum|instructional designer|learning (designer|developer)/i },
+  // Writing / content
+  { role: 'writing', re: /copywriter|content writer|technical writer|editor|journalist|communications (manager|specialist)|copy editor/i },
+  // Administrative
+  { role: 'admin', re: /executive assistant|administrative assistant|office manager|admin coordinator|receptionist|office coordinator/i },
+  // Operations
+  { role: 'operations', re: /operations manager|ops manager|business operations|revenue operations|logistics (manager|coordinator)|supply chain|operations coordinator/i },
 ]
 
-export function guessRoleType(position: string): RoleType {
+// The set of KnownRoleType values we CAN classify (everything except 'other').
+const CLASSIFIABLE_ROLES = new Set<string>(
+  KNOWN_ROLE_TYPES.map((e) => e.value).filter((v) => v !== 'other'),
+)
+
+export function guessRoleType(position: string): KnownRoleType {
   for (const { role, re } of ROLE_PATTERNS) {
     if (re.test(position)) return role
   }
@@ -192,8 +266,17 @@ export function analyzeFit(facts: PostingFacts, cvJson: string, constraints: Bas
     if (constraints.role_types_in.includes(role_type_guess)) {
       roleScore = 1
     } else {
-      roleScore = 0.25
-      notes.push(`Looks like a ${role_type_guess.replace('_', ' ')} role — outside your targeting.`)
+      // Apply penalty only when:
+      //   (a) the guess is a CONFIDENT known category (not 'other'), AND
+      //   (b) none of the user's targeting values is an unclassifiable custom string
+      //       (if a user targets e.g. 'nursing' we can't compare, so stay neutral).
+      const guessIsClassifiable = role_type_guess !== 'other' && CLASSIFIABLE_ROLES.has(role_type_guess)
+      const targetingIsComparable = constraints.role_types_in.every((r) => CLASSIFIABLE_ROLES.has(r))
+      if (guessIsClassifiable && targetingIsComparable) {
+        roleScore = 0.25
+        notes.push(`Looks like a ${role_type_guess.replace(/_/g, ' ')} role — outside your targeting.`)
+      }
+      // otherwise: guess is 'other' or targeting contains unknown custom roles → neutral (0.7)
     }
   }
 

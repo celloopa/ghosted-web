@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import {
   validateCVJson,
   baselineStatus,
+  KNOWN_ROLE_TYPES,
   type Baseline,
   type CVSummary,
   type RemotePreference,
@@ -22,13 +23,6 @@ import { describeAIAuth } from '@ghosted/core'
 
 const STEPS = ['CV', 'Voice', 'Links', 'Targeting', 'Connect', 'Review'] as const
 
-const ROLE_CHIPS: { value: RoleType; label: string }[] = [
-  { value: 'design_engineer', label: 'Design Engineer' },
-  { value: 'product_designer', label: 'Product Designer' },
-  { value: 'brand_motion', label: 'Brand / Motion' },
-  { value: 'other', label: 'Other' },
-]
-
 const REMOTE_CHIPS: { value: RemotePreference; label: string }[] = [
   { value: 'remote_only', label: 'Remote only' },
   { value: 'hybrid_ok', label: 'Hybrid OK' },
@@ -41,6 +35,7 @@ export default function Onboarding() {
   const router = useRouter()
   const [step, setStep] = useState(0)
   const [draft, setDraft] = useState<Baseline | null>(null)
+  const [customRoleInput, setCustomRoleInput] = useState('')
 
   useEffect(() => {
     if (baseline && !draft) setDraft(baseline)
@@ -117,7 +112,7 @@ export default function Onboarding() {
         <section className="section">
           <h2 className="section-title">Voice</h2>
           <p className="dim small">
-            Paste one or two past cover letters you’d actually send again. The agent calibrates
+            Paste one or two past cover letters you'd actually send again. The agent calibrates
             register from these — skip it and you get correct-but-generic.
           </p>
           {[0, 1].map((i) => (
@@ -167,9 +162,9 @@ export default function Onboarding() {
         <section className="section">
           <h2 className="section-title">Targeting</h2>
           <div className="field">
-            <span className="field-label">Role types you’re applying for (powers the fit gate + stats)</span>
-            <div className="row gap wrap">
-              {ROLE_CHIPS.map((chip) => (
+            <span className="field-label">What kinds of roles are you targeting? Pick any that fit, or add your own.</span>
+            <div className="chips" style={{ marginBottom: 8 }}>
+              {KNOWN_ROLE_TYPES.map((chip) => (
                 <button
                   key={chip.value}
                   className={`chip${draft.constraints.role_types_in.includes(chip.value) ? ' chip-selected' : ''}`}
@@ -180,9 +175,68 @@ export default function Onboarding() {
                     })
                   }
                 >
-                  {chip.label}
+                  <span style={{ fontWeight: 500 }}>{chip.label}</span>
+                  <span className="chip-examples">{chip.examples}</span>
                 </button>
               ))}
+              {/* Custom targets added by the user — removable chips */}
+              {draft.constraints.role_types_in
+                .filter((r) => !KNOWN_ROLE_TYPES.some((k) => k.value === r))
+                .map((custom) => (
+                  <button
+                    key={custom}
+                    className="chip chip-selected"
+                    onClick={() =>
+                      setDraft({
+                        ...draft,
+                        constraints: { ...draft.constraints, role_types_in: draft.constraints.role_types_in.filter((r) => r !== custom) },
+                      })
+                    }
+                    title="Click to remove"
+                  >
+                    <span style={{ fontWeight: 500 }}>{custom}</span>
+                    <span className="chip-examples">click to remove</span>
+                  </button>
+                ))}
+            </div>
+            <div className="row gap" style={{ marginTop: 4 }}>
+              <input
+                className="input"
+                style={{ flex: 1 }}
+                placeholder="Add your own role type"
+                aria-label="Add your own role type"
+                value={customRoleInput}
+                onChange={(e) => setCustomRoleInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    const trimmed = customRoleInput.trim()
+                    if (trimmed && !draft.constraints.role_types_in.includes(trimmed as RoleType)) {
+                      setDraft({
+                        ...draft,
+                        constraints: { ...draft.constraints, role_types_in: [...draft.constraints.role_types_in, trimmed as RoleType] },
+                      })
+                    }
+                    setCustomRoleInput('')
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  const trimmed = customRoleInput.trim()
+                  if (trimmed && !draft.constraints.role_types_in.includes(trimmed as RoleType)) {
+                    setDraft({
+                      ...draft,
+                      constraints: { ...draft.constraints, role_types_in: [...draft.constraints.role_types_in, trimmed as RoleType] },
+                    })
+                  }
+                  setCustomRoleInput('')
+                }}
+              >
+                Add
+              </button>
             </div>
           </div>
           <div className="field">

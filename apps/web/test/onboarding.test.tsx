@@ -104,6 +104,31 @@ describe('baseline onboarding wizard', () => {
     })
   })
 
+  it('typing a custom role target and adding it puts it in role_types_in and enables Continue', async () => {
+    setup()
+    await enterCV(VALID_CV)
+
+    await screen.findByText(/✓ Cello Rondon/)
+    fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Skip for now' })) // voice
+    await screen.findByRole('heading', { name: 'Links' })
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' })) // links
+
+    await screen.findByRole('heading', { name: 'Targeting' })
+    const continueBtn = screen.getByRole('button', { name: 'Continue' })
+    expect((continueBtn as HTMLButtonElement).disabled).toBe(true)
+
+    // Type a custom role and click Add
+    const customInput = screen.getByPlaceholderText('Add your own role type')
+    fireEvent.change(customInput, { target: { value: 'Veterinary Tech' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+
+    // The custom chip should appear selected
+    expect(await screen.findByRole('button', { name: /Veterinary Tech/ })).toBeTruthy()
+    // Continue should now be enabled
+    expect((continueBtn as HTMLButtonElement).disabled).toBe(false)
+  })
+
   it('finish is gated on baseline readiness (CV + role targeting)', async () => {
     setup()
     await enterCV(VALID_CV)
@@ -118,7 +143,7 @@ describe('baseline onboarding wizard', () => {
     await screen.findByRole('heading', { name: 'Targeting' })
     const continueBtn = screen.getByRole('button', { name: 'Continue' })
     expect((continueBtn as HTMLButtonElement).disabled).toBe(true)
-    fireEvent.click(screen.getByRole('button', { name: 'Design Engineer' }))
+    fireEvent.click(screen.getByRole('button', { name: /Software Engineering.*backend/s }))
     expect((continueBtn as HTMLButtonElement).disabled).toBe(false)
     fireEvent.click(continueBtn)
 

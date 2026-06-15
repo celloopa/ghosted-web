@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { deriveSource, type Application, type RoleType } from '@ghosted/core'
+import { deriveSource, KNOWN_ROLE_TYPES, type Application, type RoleType } from '@ghosted/core'
 import { plusDays, todayISO } from '../lib/dates'
 
 // Capture: thirty seconds, standing up. ≤7 fields visible; role_type is
@@ -17,17 +17,11 @@ const INTENTS: { id: Intent; label: string; detail: string }[] = [
   { id: 'remind', label: 'Remind me', detail: 'Saved — Today will nudge you on the date you pick.' },
 ]
 
-const ROLE_CHIPS: { value: RoleType; label: string; examples: string }[] = [
-  { value: 'design_engineer', label: 'Design Engineer', examples: 'design engineer, UX engineer, creative technologist' },
-  { value: 'product_designer', label: 'Product Designer', examples: 'product, UX, interaction design' },
-  { value: 'brand_motion', label: 'Brand / Motion', examples: 'brand, visual, motion, marketing design' },
-  { value: 'other', label: 'Other', examples: 'everything else — still counts' },
-]
-
 export function CaptureForm({ onSubmit }: { onSubmit: (app: Application) => void | Promise<void> }) {
   const [company, setCompany] = useState('')
   const [position, setPosition] = useState('')
   const [roleType, setRoleType] = useState<RoleType | null>(null)
+  const [customRole, setCustomRole] = useState('')
   const [intent, setIntent] = useState<Intent | null>(null)
   const [jobUrl, setJobUrl] = useState('')
   const [dateApplied, setDateApplied] = useState(todayISO())
@@ -36,6 +30,14 @@ export function CaptureForm({ onSubmit }: { onSubmit: (app: Application) => void
   const [showMore, setShowMore] = useState(false)
   const [notes, setNotes] = useState('')
   const [error, setError] = useState<string | null>(null)
+
+  const isOther = roleType === 'other'
+
+  function resolvedRoleType(): RoleType | null {
+    if (roleType === null) return null
+    if (isOther) return customRole.trim() || 'other'
+    return roleType
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -48,7 +50,7 @@ export function CaptureForm({ onSubmit }: { onSubmit: (app: Application) => void
       id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `app-${Date.now()}`,
       company: company.trim(),
       position: position.trim(),
-      role_type: roleType,
+      role_type: resolvedRoleType()!,
       status: intent === 'have' ? 'applied' : 'saved',
       events: intent === 'have' ? [{ type: 'applied', date: dateApplied }] : [],
     }
@@ -80,7 +82,7 @@ export function CaptureForm({ onSubmit }: { onSubmit: (app: Application) => void
       <div className="field">
         <span className="field-label">Role type</span>
         <div className="chips">
-          {ROLE_CHIPS.map((chip) => (
+          {KNOWN_ROLE_TYPES.map((chip) => (
             <button
               key={chip.value}
               type="button"
@@ -88,11 +90,22 @@ export function CaptureForm({ onSubmit }: { onSubmit: (app: Application) => void
               onClick={() => setRoleType(chip.value)}
               title={chip.examples}
             >
-              <span>{chip.label}</span>
+              <span style={{ fontWeight: 500 }}>{chip.label}</span>
               <span className="chip-examples">{chip.examples}</span>
             </button>
           ))}
         </div>
+        {isOther && (
+          <div style={{ marginTop: 8 }}>
+            <input
+              className="input"
+              value={customRole}
+              onChange={(e) => setCustomRole(e.target.value)}
+              placeholder="Your role / field"
+              aria-label="Your role / field"
+            />
+          </div>
+        )}
       </div>
 
       <div className="field">

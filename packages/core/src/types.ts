@@ -1,6 +1,48 @@
 // The whole product model. Pure data — no I/O, no framework, no clock.
 
-export type RoleType = 'design_engineer' | 'product_designer' | 'brand_motion' | 'other'
+export type KnownRoleType =
+  | 'software_engineering'
+  | 'design'
+  | 'product'
+  | 'data'
+  | 'marketing'
+  | 'sales'
+  | 'customer_service'
+  | 'operations'
+  | 'project_management'
+  | 'finance'
+  | 'healthcare'
+  | 'education'
+  | 'writing'
+  | 'admin'
+  | 'other'
+
+// (string & {}) preserves known-value autocomplete hints while allowing any custom string.
+export type RoleType = KnownRoleType | (string & {})
+
+export interface KnownRoleTypeEntry {
+  value: KnownRoleType
+  label: string
+  examples: string
+}
+
+export const KNOWN_ROLE_TYPES: KnownRoleTypeEntry[] = [
+  { value: 'software_engineering', label: 'Software Engineering', examples: 'software engineer, backend, frontend, full-stack, SRE' },
+  { value: 'design', label: 'Design', examples: 'product designer, UX, UI, brand, motion, graphic design' },
+  { value: 'product', label: 'Product Management', examples: 'product manager, PM, APM, growth PM' },
+  { value: 'data', label: 'Data & Analytics', examples: 'data analyst, data scientist, BI engineer, ML engineer' },
+  { value: 'marketing', label: 'Marketing', examples: 'marketing manager, growth, content, SEO, demand gen' },
+  { value: 'sales', label: 'Sales', examples: 'account executive, sales rep, BDR, SDR, solutions engineer' },
+  { value: 'customer_service', label: 'Customer Service', examples: 'support, client coordinator, call center, success manager' },
+  { value: 'operations', label: 'Operations', examples: 'ops manager, biz ops, revenue ops, logistics coordinator' },
+  { value: 'project_management', label: 'Project Management', examples: 'project manager, program manager, PMO, scrum master' },
+  { value: 'finance', label: 'Finance & Accounting', examples: 'accountant, financial analyst, controller, bookkeeper' },
+  { value: 'healthcare', label: 'Healthcare', examples: 'nurse, medical assistant, patient coordinator, care manager' },
+  { value: 'education', label: 'Education', examples: 'teacher, instructional designer, tutor, curriculum developer' },
+  { value: 'writing', label: 'Writing & Content', examples: 'copywriter, content writer, editor, technical writer' },
+  { value: 'admin', label: 'Administrative', examples: 'executive assistant, office manager, admin coordinator' },
+  { value: 'other', label: 'Something else', examples: 'anything not listed — you can type your own' },
+]
 
 /** The 5 user-set statuses. ghosted / needs-follow-up are DERIVED, never stored. */
 export type Status = 'saved' | 'applied' | 'interviewing' | 'offer' | 'closed'

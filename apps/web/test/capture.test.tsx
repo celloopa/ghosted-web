@@ -20,8 +20,8 @@ describe('CaptureForm (M3: one form, ≤7 fields, role_type required)', () => {
     const onSubmit = vi.fn()
     render(<CaptureForm onSubmit={onSubmit} />)
     fill(/hopes up/i, 'Figma')
-    fill(/job title/i, 'Design Engineer')
-    fireEvent.click(screen.getByRole('button', { name: /Design Engineer.*creative technologist/s }))
+    fill(/job title/i, 'Software Engineer')
+    fireEvent.click(screen.getByRole('button', { name: /Software Engineering.*backend/s }))
     fireEvent.click(screen.getByRole('button', { name: 'Add application' }))
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toMatch(/what happens next/i)
@@ -38,8 +38,8 @@ describe('CaptureForm (M3: one form, ≤7 fields, role_type required)', () => {
       />,
     )
     fill(/hopes up/i, 'Figma')
-    fill(/job title/i, 'Design Engineer')
-    fireEvent.click(screen.getByRole('button', { name: /Design Engineer.*creative technologist/s }))
+    fill(/job title/i, 'Software Engineer')
+    fireEvent.click(screen.getByRole('button', { name: /Software Engineering.*backend/s }))
     fireEvent.click(screen.getByRole('button', { name: /Applying now — I have my materials/ }))
     fill(/https/i, 'https://boards.greenhouse.io/figma/jobs/1')
     fireEvent.click(screen.getByRole('button', { name: 'Add application' }))
@@ -47,8 +47,8 @@ describe('CaptureForm (M3: one form, ≤7 fields, role_type required)', () => {
     await waitFor(() => expect(captured).toBeDefined())
     expect(captured).toMatchObject({
       company: 'Figma',
-      position: 'Design Engineer',
-      role_type: 'design_engineer',
+      position: 'Software Engineer',
+      role_type: 'software_engineering',
       status: 'applied',
       source: 'greenhouse',
     })
@@ -67,7 +67,7 @@ describe('CaptureForm (M3: one form, ≤7 fields, role_type required)', () => {
     )
     fill(/hopes up/i, 'Acme')
     fill(/job title/i, 'Designer')
-    fireEvent.click(screen.getByRole('button', { name: /Product Designer/s }))
+    fireEvent.click(screen.getByRole('button', { name: /^Design\b.*product designer/s }))
     fireEvent.click(screen.getByRole('button', { name: /Just saving it/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Add application' }))
 
@@ -87,8 +87,8 @@ describe('CaptureForm (M3: one form, ≤7 fields, role_type required)', () => {
       />,
     )
     fill(/hopes up/i, 'Figma')
-    fill(/job title/i, 'Design Engineer')
-    fireEvent.click(screen.getByRole('button', { name: /Brand \/ Motion/s }))
+    fill(/job title/i, 'Marketing Manager')
+    fireEvent.click(screen.getByRole('button', { name: /Marketing.*growth/s }))
     fireEvent.click(screen.getByRole('button', { name: /I need materials/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Continue to materials' }))
 
@@ -107,12 +107,54 @@ describe('CaptureForm (M3: one form, ≤7 fields, role_type required)', () => {
     )
     fill(/hopes up/i, 'Acme')
     fill(/job title/i, 'Designer')
-    fireEvent.click(screen.getByRole('button', { name: /Product Designer/s }))
+    fireEvent.click(screen.getByRole('button', { name: /^Design\b.*product designer/s }))
     fireEvent.click(screen.getByRole('button', { name: /Remind me/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Add application' }))
 
     await waitFor(() => expect(captured).toBeDefined())
     expect(captured!.status).toBe('saved')
     expect(captured!.remind_at).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
+
+  it('selecting "Something else" + typing a custom role submits that string as role_type', async () => {
+    let captured: Application | undefined
+    render(
+      <CaptureForm
+        onSubmit={(app) => {
+          captured = app
+        }}
+      />,
+    )
+    fill(/hopes up/i, 'Acme')
+    fill(/job title/i, 'Nursing Coordinator')
+    fireEvent.click(screen.getByRole('button', { name: /Something else/s }))
+    // The custom role input should appear
+    const customInput = await screen.findByPlaceholderText('Your role / field')
+    fireEvent.change(customInput, { target: { value: 'Nursing' } })
+    fireEvent.click(screen.getByRole('button', { name: /Just saving it/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add application' }))
+
+    await waitFor(() => expect(captured).toBeDefined())
+    expect(captured!.role_type).toBe('Nursing')
+  })
+
+  it('selecting "Something else" and leaving the field blank falls back to role_type "other"', async () => {
+    let captured: Application | undefined
+    render(
+      <CaptureForm
+        onSubmit={(app) => {
+          captured = app
+        }}
+      />,
+    )
+    fill(/hopes up/i, 'Acme')
+    fill(/job title/i, 'Misc')
+    fireEvent.click(screen.getByRole('button', { name: /Something else/s }))
+    // leave the custom role input empty
+    fireEvent.click(screen.getByRole('button', { name: /Just saving it/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add application' }))
+
+    await waitFor(() => expect(captured).toBeDefined())
+    expect(captured!.role_type).toBe('other')
   })
 })
