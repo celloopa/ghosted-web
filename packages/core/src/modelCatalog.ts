@@ -48,7 +48,7 @@ export interface UsageCost {
 export interface GenerationRunRecord {
   id: string
   at: string
-  task: 'cover_letter' | 'revision' | 'answer' | 'unknown'
+  task: 'cover_letter' | 'revision' | 'answer' | 'cv' | 'unknown'
   provider: AIProvider
   model: string
   method: string

@@ -13,6 +13,7 @@ import {
 import { useBaseline } from '../../lib/useBaseline'
 import { useAIAuth } from '../../lib/useAIAuth'
 import { ConnectAI } from '../../components/ConnectAI'
+import { CVBuilder } from '../../components/CVBuilder'
 import { describeAIAuth } from '@ghosted/core'
 
 // Baseline kit onboarding: one-time, ~10 minutes, draft-saved at every
@@ -88,30 +89,12 @@ export default function Onboarding() {
         <section className="section">
           <h2 className="section-title">Your CV</h2>
           <p className="dim small">
-            JSON Resume format. Paste it, or pick the file (e.g.{' '}
-            <span className="mono">local/cv.json</span> from the ghosted repo).
+            Build it from scratch, upload your existing résumé, or paste a JSON Resume if you have one.
           </p>
-          <input
-            type="file"
-            accept="application/json,.json"
-            aria-label="CV file"
-            onChange={async (e) => {
-              const f = e.target.files?.[0]
-              if (f) setDraft({ ...draft, cv_json: await f.text() })
-            }}
+          <CVBuilder
+            cvJson={draft.cv_json}
+            onConfirm={(cvJson) => setDraft({ ...draft, cv_json: cvJson })}
           />
-          <textarea
-            className="input mono cv-paste"
-            rows={8}
-            placeholder='{"basics":{"name":"…"},"work":[…],"skills":[…]}'
-            value={draft.cv_json ?? ''}
-            onChange={(e) => setDraft({ ...draft, cv_json: e.target.value })}
-          />
-          {draft.cv_json && cv && !cv.ok && (
-            <p className="form-error" role="alert">
-              {cv.errors[0]?.message}
-            </p>
-          )}
           {cvSummary && (
             <div className="card cv-summary">
               <span className="success">✓ {cvSummary.name}</span>

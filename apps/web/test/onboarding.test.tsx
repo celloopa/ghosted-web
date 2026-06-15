@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { BaselineProvider } from '../lib/useBaseline'
 import { MemoryBaselineRepo } from '../lib/baselineRepo'
@@ -16,6 +16,10 @@ const VALID_CV = JSON.stringify({
   skills: [{ name: 'TypeScript' }],
 })
 
+// Suppress ModelPicker fetch noise
+const NO_OP_FETCH = () =>
+  Promise.resolve(new Response(JSON.stringify({ models: [] }), { status: 200 }))
+
 function setup(repo = new MemoryBaselineRepo()) {
   render(
     <BaselineProvider repo={repo}>
@@ -27,24 +31,65 @@ function setup(repo = new MemoryBaselineRepo()) {
   return repo
 }
 
+/** Navigate the CVBuilder to the paste-JSON textarea */
+async function openJsonPaste() {
+  // Click the "Advanced: paste JSON" toggle in CVBuilder
+  const toggle = await screen.findByRole('button', { name: 'Advanced: paste JSON' })
+  fireEvent.click(toggle)
+  // Wait for the JSON textarea (placeholder contains "basics")
+  return await screen.findByPlaceholderText(/basics/)
+}
+
+/** Paste a CV in the paste-JSON path and confirm it */
+async function enterCV(cv: string) {
+  const textarea = await openJsonPaste()
+  fireEvent.change(textarea, { target: { value: cv } })
+  // Click "Use this CV"
+  const useBtn = await screen.findByRole('button', { name: 'Use this CV' })
+  await waitFor(() => expect((useBtn as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(useBtn)
+}
+
 describe('baseline onboarding wizard', () => {
+  let originalFetch: typeof globalThis.fetch
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch
+    globalThis.fetch = NO_OP_FETCH as unknown as typeof fetch
+  })
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+    vi.restoreAllMocks()
+  })
+
   it('CV step blocks continue until a valid CV is provided', async () => {
     setup()
     const continueBtn = await screen.findByRole('button', { name: 'Continue' })
     expect((continueBtn as HTMLButtonElement).disabled).toBe(true)
 
-    fireEvent.change(screen.getByPlaceholderText(/basics/), { target: { value: 'not json' } })
+    const textarea = await openJsonPaste()
+
+    fireEvent.change(textarea, { target: { value: 'not json' } })
     expect(await screen.findByRole('alert')).toBeTruthy()
     expect((continueBtn as HTMLButtonElement).disabled).toBe(true)
 
-    fireEvent.change(screen.getByPlaceholderText(/basics/), { target: { value: VALID_CV } })
+    fireEvent.change(textarea, { target: { value: VALID_CV } })
+    // Click "Use this CV" to confirm into the onboarding draft
+    const useBtn = await screen.findByRole('button', { name: 'Use this CV' })
+    await waitFor(() => expect((useBtn as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(useBtn)
+
     expect(await screen.findByText(/✓ Cello Rondon/)).toBeTruthy()
     expect((continueBtn as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('saves a draft at each step and prefills links from CV profiles', async () => {
     const repo = setup()
-    fireEvent.change(await screen.findByPlaceholderText(/basics/), { target: { value: VALID_CV } })
+    await enterCV(VALID_CV)
+
+    // cv summary should appear
+    await screen.findByText(/✓ Cello Rondon/)
     fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
 
     // Voice step — skip
@@ -61,7 +106,9 @@ describe('baseline onboarding wizard', () => {
 
   it('finish is gated on baseline readiness (CV + role targeting)', async () => {
     setup()
-    fireEvent.change(await screen.findByPlaceholderText(/basics/), { target: { value: VALID_CV } })
+    await enterCV(VALID_CV)
+
+    await screen.findByText(/✓ Cello Rondon/)
     fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Skip for now' })) // voice
     await screen.findByRole('heading', { name: 'Links' })
