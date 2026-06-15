@@ -9,6 +9,7 @@ import {
   type CVView,
 } from '@ghosted/core'
 import { useAIAuth } from '../lib/useAIAuth'
+import { useHosted } from '../lib/useHosted'
 import { useModelChoice } from '../lib/useModelChoice'
 import { ConnectAI } from './ConnectAI'
 import { ModelPicker } from './ModelPicker'
@@ -34,6 +35,7 @@ type CVSource = { kind: 'pdf' | 'text'; data: string; filename?: string }
 
 export function CVBuilder({ cvJson, onConfirm }: CVBuilderProps) {
   const { auth, connect } = useAIAuth()
+  const hosted = useHosted()
   const { model: chosenModel } = useModelChoice()
 
   const [mode, setMode] = useState<Mode>('interview')
@@ -59,8 +61,10 @@ export function CVBuilder({ cvJson, onConfirm }: CVBuilderProps) {
   // Interview path busy flag (lifted so the build button can be disabled)
   const [interviewBusy, setInterviewBusy] = useState(false)
 
-  // Check whether upload/interview need a connection
-  const needsConnection = (mode === 'interview' || mode === 'upload') && !auth
+  // Check whether upload/interview need a connection.
+  // On a hosted instance the house account covers generation, so we never
+  // force the user to connect their own key.
+  const needsConnection = (mode === 'interview' || mode === 'upload') && !auth && !hosted
 
   async function callModel(prompt: string): Promise<string> {
     const res = await fetch('/api/generate', {

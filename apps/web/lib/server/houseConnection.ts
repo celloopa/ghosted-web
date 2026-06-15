@@ -12,6 +12,14 @@
 import { validateAIAuth, type AIAuth, type AIProvider } from '@ghosted/core'
 
 /**
+ * Returns true when the auth requires a local CLI binary (claude or codex).
+ * These connections cannot work on a hosted server that has no CLI installed.
+ */
+export function isCliBasedAuth(auth: AIAuth): boolean {
+  return auth.method === 'local_cli' || auth.provider === 'codex'
+}
+
+/**
  * Build an AIAuth from the GHOSTED_HOUSE_* environment variables.
  * Returns null when GHOSTED_HOUSE_TOKEN is unset (gate is off).
  */
@@ -50,7 +58,23 @@ export function resolveConnection(requestAuth: AIAuth | undefined): ResolveResul
   // Caller provided an auth — validate it.
   if (requestAuth) {
     const valid = validateAIAuth(requestAuth)
-    if (valid.ok) return { auth: requestAuth, usingHouse: false }
+    if (valid.ok) {
+      // CLI-based auth needs a local binary. On a hosted server that binary
+      // won't exist, so if a house account is configured we use that instead.
+      // With NO house account (local dev), we honour the CLI auth as-is so
+      // the owner's real claude/codex CLI keeps working.
+      if (isCliBasedAuth(requestAuth)) {
+        const house = houseConnection()
+        if (house) {
+          const houseValid = validateAIAuth(house)
+          if (houseValid.ok) return { auth: house, usingHouse: true }
+          return { error: `House account misconfigured: ${houseValid.message}` }
+        }
+        // No house token — local-dev path: use the CLI auth as-is.
+        return { auth: requestAuth, usingHouse: false }
+      }
+      return { auth: requestAuth, usingHouse: false }
+    }
     // Invalid caller auth: fall through to the house account rather than
     // hard-rejecting — the house account is the point of the deployment.
   }

@@ -32,6 +32,7 @@ import {
 import { useApps } from '../../lib/useApps'
 import { useBaseline } from '../../lib/useBaseline'
 import { useAIAuth } from '../../lib/useAIAuth'
+import { useHosted } from '../../lib/useHosted'
 import { ConnectAI } from '../../components/ConnectAI'
 import { ModelPicker } from '../../components/ModelPicker'
 import { QuestionsPanel } from '../../components/QuestionsPanel'
@@ -1030,6 +1031,7 @@ function Workspace({ app }: { app: Application }) {
   const { updateApplication, transitionTo } = useApps()
   const { baseline } = useBaseline()
   const { auth, connect } = useAIAuth()
+  const hosted = useHosted()
   const { model: chosenModel } = useModelChoice()
   const router = useRouter()
 
@@ -1258,7 +1260,7 @@ function Workspace({ app }: { app: Application }) {
 
         <main className="materials-main">
           {generating && <LoadingPanel title="Writing editable materials" detail="Drafting cover letter, resume rewrites, opportunity angles, and standout moves from your existing evidence." />}
-          {!auth ? (
+          {!auth && !hosted ? (
             <div className="card">
               <p className="dim small">Connect your AI to draft editable materials. Tracking still works without it.</p>
               <ConnectAI onConnect={connect} />

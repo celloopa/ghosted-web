@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { houseConnection, resolveConnection } from '../lib/server/houseConnection'
+import { houseConnection, resolveConnection, isCliBasedAuth } from '../lib/server/houseConnection'
 import type { AIAuth } from '@ghosted/core'
 
 // Save originals so we can restore them.
@@ -139,5 +139,126 @@ describe('resolveConnection', () => {
     const result = resolveConnection(undefined)
     if (!('error' in result)) return
     expect(result.error).not.toContain('sk-ant-oat01-should-not-appear')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// isCliBasedAuth
+// ---------------------------------------------------------------------------
+
+describe('isCliBasedAuth', () => {
+  it('returns true for anthropic/local_cli', () => {
+    const auth: AIAuth = { provider: 'anthropic', method: 'local_cli' }
+    expect(isCliBasedAuth(auth)).toBe(true)
+  })
+
+  it('returns true for codex/local_cli', () => {
+    const auth: AIAuth = { provider: 'codex', method: 'local_cli' }
+    expect(isCliBasedAuth(auth)).toBe(true)
+  })
+
+  it('returns true for codex/api_key (codex has no non-CLI path)', () => {
+    // codex provider always requires the CLI binary
+    const auth: AIAuth = { provider: 'codex', method: 'api_key' }
+    expect(isCliBasedAuth(auth)).toBe(true)
+  })
+
+  it('returns false for anthropic/oauth_token', () => {
+    const auth: AIAuth = { provider: 'anthropic', method: 'oauth_token', key: 'sk-ant-oat01-x' }
+    expect(isCliBasedAuth(auth)).toBe(false)
+  })
+
+  it('returns false for anthropic/api_key', () => {
+    const auth: AIAuth = { provider: 'anthropic', method: 'api_key', key: 'sk-ant-key123' }
+    expect(isCliBasedAuth(auth)).toBe(false)
+  })
+
+  it('returns false for openai/api_key', () => {
+    const auth: AIAuth = { provider: 'openai', method: 'api_key', key: 'sk-openai-key123' }
+    expect(isCliBasedAuth(auth)).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// resolveConnection — CLI-based auth fallback logic (Fix 1)
+// ---------------------------------------------------------------------------
+
+describe('resolveConnection — CLI fallback', () => {
+  const VALID_HOUSE_TOKEN = 'sk-ant-oat01-test-house-token-xxxx'
+
+  const localCliAuth: AIAuth = {
+    provider: 'anthropic',
+    method: 'local_cli',
+  }
+
+  const codexAuth: AIAuth = {
+    provider: 'codex',
+    method: 'local_cli',
+  }
+
+  const apiKeyAuth: AIAuth = {
+    provider: 'anthropic',
+    method: 'api_key',
+    key: 'sk-ant-apikey-long-enough-here-xxx',
+  }
+
+  const oauthAuth: AIAuth = {
+    provider: 'anthropic',
+    method: 'oauth_token',
+    key: 'sk-ant-oat01-caller-token-long-xx',
+  }
+
+  it('local_cli + house set → returns house (usingHouse true)', () => {
+    setEnv({ GHOSTED_HOUSE_TOKEN: VALID_HOUSE_TOKEN })
+    const result = resolveConnection(localCliAuth)
+    expect('error' in result).toBe(false)
+    if ('error' in result) return
+    expect(result.usingHouse).toBe(true)
+    expect(result.auth.key).toBe(VALID_HOUSE_TOKEN)
+  })
+
+  it('codex + house set → returns house (usingHouse true)', () => {
+    setEnv({ GHOSTED_HOUSE_TOKEN: VALID_HOUSE_TOKEN })
+    const result = resolveConnection(codexAuth)
+    expect('error' in result).toBe(false)
+    if ('error' in result) return
+    expect(result.usingHouse).toBe(true)
+    expect(result.auth.key).toBe(VALID_HOUSE_TOKEN)
+  })
+
+  it('local_cli + NO house → returns the local_cli auth as-is (local-dev path)', () => {
+    // No GHOSTED_HOUSE_TOKEN in env — owner's local machine with real claude CLI.
+    const result = resolveConnection(localCliAuth)
+    expect('error' in result).toBe(false)
+    if ('error' in result) return
+    expect(result.usingHouse).toBe(false)
+    expect(result.auth.method).toBe('local_cli')
+  })
+
+  it('api_key anthropic + house set → returns the caller api_key (usingHouse false)', () => {
+    setEnv({ GHOSTED_HOUSE_TOKEN: VALID_HOUSE_TOKEN })
+    const result = resolveConnection(apiKeyAuth)
+    expect('error' in result).toBe(false)
+    if ('error' in result) return
+    expect(result.usingHouse).toBe(false)
+    expect(result.auth.key).toBe(apiKeyAuth.key)
+  })
+
+  it('oauth_token + house set → returns the caller oauth_token (usingHouse false)', () => {
+    setEnv({ GHOSTED_HOUSE_TOKEN: VALID_HOUSE_TOKEN })
+    const result = resolveConnection(oauthAuth)
+    expect('error' in result).toBe(false)
+    if ('error' in result) return
+    expect(result.usingHouse).toBe(false)
+    expect(result.auth.key).toBe(oauthAuth.key)
+  })
+
+  it('no auth + house set → house (usingHouse true)', () => {
+    setEnv({ GHOSTED_HOUSE_TOKEN: VALID_HOUSE_TOKEN })
+    const result = resolveConnection(undefined)
+    expect('error' in result).toBe(false)
+    if ('error' in result) return
+    expect(result.usingHouse).toBe(true)
+    expect(result.auth.key).toBe(VALID_HOUSE_TOKEN)
   })
 })

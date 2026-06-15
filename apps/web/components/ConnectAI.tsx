@@ -10,6 +10,7 @@ import {
   type AIProvider,
   type ModelCatalogEntry,
 } from '@ghosted/core'
+import { useHosted } from '../lib/useHosted'
 
 // No humor here — auth is one of the surfaces where the voice goes plain
 // (decision interview §2).
@@ -70,6 +71,14 @@ function dollarsPerMTok(price?: number) {
 }
 
 export function ConnectAI({ onConnect, current }: { onConnect: (auth: AIAuth) => void | Promise<void>; current?: AIAuth | null }) {
+  const hosted = useHosted()
+
+  // On a hosted instance CLI options cannot work — the server has no local
+  // binary. Remove them so testers aren't offered a path that will always fail.
+  const visibleOptions = hosted
+    ? OPTIONS.filter((o) => o.method !== 'local_cli' && o.provider !== 'codex')
+    : OPTIONS
+
   const [selected, setSelected] = useState<string | null>(
     current ? OPTIONS.find((o) => o.provider === current.provider && o.method === current.method)?.id ?? null : null,
   )
@@ -110,8 +119,13 @@ export function ConnectAI({ onConnect, current }: { onConnect: (auth: AIAuth) =>
 
   return (
     <div>
+      {hosted && (
+        <p className="dim small connect-hosted-note">
+          Generation uses a shared account by default — connect your own key only if you would rather use it.
+        </p>
+      )}
       <div className="connect-options">
-        {OPTIONS.map((o) => (
+        {visibleOptions.map((o) => (
           <button
             key={o.id}
             type="button"
