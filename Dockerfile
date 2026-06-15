@@ -36,12 +36,15 @@ FROM node:22-slim AS runner
 
 # --- System runtime dependencies --------------------------------
 
-# poppler-utils: provides pdftotext, used by /api/cv/extract and
-#                the ATS validator to pull text from PDF uploads.
+# poppler-utils: provides pdftotext + pdftoppm, used by /api/cv/extract
+#                (and the screenshot fallback) and the ATS validator.
 # python3:       runs apps/web/tools/ats/validate_ats.py.
+# xz-utils:      provides `xz`, required by `tar -xJ` to unpack the
+#                Typst .tar.xz release below (node:22-slim omits it).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         poppler-utils \
         python3 \
+        xz-utils \
         curl \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
