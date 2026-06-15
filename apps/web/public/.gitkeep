@@ -1,0 +1,2 @@
+# Keeps apps/web/public/ in version control so the Docker build can COPY it.
+# Next.js serves files placed here at the site root (favicon, og images, etc.).
