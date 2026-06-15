@@ -161,6 +161,79 @@ export function parseGeneration(raw: string): GenerationResult {
   }
 }
 
+export type RevisionTarget = 'cover_letter' | 'summary'
+
+export interface TargetedRevisionOpts {
+  target: RevisionTarget
+  current: string
+  instruction: string
+}
+
+export type TargetedRevisionResult = { ok: true; value: string } | { ok: false; error: string }
+
+/**
+ * Builds a focused prompt that revises ONLY one piece and returns ONLY that piece.
+ * The model must respond with `{"cover_letter":"..."}` or `{"summary":"..."}`.
+ */
+export function buildTargetedRevisionPrompt(input: GenerationInput, opts: TargetedRevisionOpts): string {
+  const { target, current, instruction } = opts
+
+  const targetRules =
+    target === 'cover_letter'
+      ? `Hard rules for cover_letter:
+- HARD LIMIT ${LETTER_WORD_LIMIT} words including any sign-off. Count before answering; cut until under.
+- Must contain one specific, verifiable fact about ${input.company} AND one concrete project match from the CV.
+- Transplant test: if this letter would make sense sent to a different company, rewrite before answering.
+- Banned phrases (must not appear): ${BANNED_PHRASES.map((p) => `"${p}"`).join(', ')}.
+- Never invent roles, dates, employers, metrics, tools, case studies, contacts, or company facts.`
+      : `Hard rules for summary:
+- One resume summary line, ≤40 words maximum.
+- Mirror the posting's language; truthful to the CV only.
+- Never invent roles, dates, employers, metrics, tools, or experience.`
+
+  return `You are revising a single field in a job application for a designer who codes.
+Job: ${input.position} at ${input.company}
+Posting excerpt:
+${clip(input.descriptionExcerpt, 3000)}
+
+Candidate CV (JSON Resume — the single source of truth, never invent beyond it):
+${clip(input.cvJson, 8000)}
+
+Current ${target}:
+${current}
+
+Revision instruction from the candidate: ${instruction}
+
+${targetRules}
+
+Apply the instruction to the current ${target}. Change NOTHING ELSE about any other field.
+Respond with ONLY a JSON object containing the single revised field, no code fences, no prose:
+{"${target}":"..."}`
+}
+
+/**
+ * Lenient parser for targeted revision responses.
+ * Pulls only the target key's string value.
+ */
+export function parseTargetedRevision(raw: string, target: RevisionTarget): TargetedRevisionResult {
+  const start = raw.indexOf('{')
+  const end = raw.lastIndexOf('}')
+  if (start < 0 || end <= start) return { ok: false, error: 'no JSON object in model response' }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw.slice(start, end + 1))
+  } catch (e) {
+    return { ok: false, error: `model response was not valid JSON: ${(e as Error).message}` }
+  }
+  if (typeof parsed !== 'object' || parsed === null) return { ok: false, error: 'unexpected response shape' }
+  const rec = parsed as Record<string, unknown>
+  const value = rec[target]
+  if (typeof value !== 'string' || !value.trim()) {
+    return { ok: false, error: `response missing or empty "${target}" field` }
+  }
+  return { ok: true, value: value.trim() }
+}
+
 export interface LetterCheck {
   words: number
   overLimit: boolean

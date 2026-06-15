@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { parsePostingHTML } from '@ghosted/core'
+import { postingFetchErrorMessage } from '../../../lib/server/postingHelpers'
 
 // Server-side fetch (job boards block browser CORS) + deterministic parse.
 // No model involved.
@@ -48,7 +49,7 @@ export async function POST(req: NextRequest) {
     })
     if (!res.ok) {
       return NextResponse.json(
-        { error: `the page answered ${res.status} — paste the posting text instead` },
+        { error: postingFetchErrorMessage(parsed.hostname, 'blocked') },
         { status: 502 },
       )
     }
@@ -56,14 +57,14 @@ export async function POST(req: NextRequest) {
     const facts = parsePostingHTML(html, parsed.toString())
     if (facts.description.length < 200) {
       return NextResponse.json(
-        { error: 'the page yielded almost no text (likely JS-rendered or bot-walled) — paste the posting instead', facts },
+        { error: postingFetchErrorMessage(parsed.hostname, 'low-text'), facts },
         { status: 422 },
       )
     }
     console.log(JSON.stringify({ kind: 'posting_fetch', host: parsed.hostname, ms: Date.now() - started, chars: facts.description.length }))
     return NextResponse.json({ facts })
   } catch (e) {
-    const message = e instanceof Error && e.name === 'TimeoutError' ? 'fetch timed out' : 'could not fetch that URL'
-    return NextResponse.json({ error: `${message} — paste the posting text instead` }, { status: 502 })
+    const reason = e instanceof Error && e.name === 'TimeoutError' ? 'timeout' : 'network'
+    return NextResponse.json({ error: postingFetchErrorMessage(parsed.hostname, reason) }, { status: 502 })
   }
 }

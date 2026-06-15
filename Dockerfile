@@ -47,6 +47,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         xz-utils \
         curl \
         ca-certificates \
+        fonts-roboto \
     && rm -rf /var/lib/apt/lists/*
 
 # typst: document renderer for CV/resume PDF export.
@@ -60,6 +61,19 @@ RUN curl -fsSL \
     && chmod +x /usr/local/bin/typst \
     # Smoke-test the binary.
     && typst --version
+
+# Pre-cache the Typst packages used by the modern-cv template so the container
+# never needs network access at export time.  The compile step downloads
+# modern-cv:0.9.0 and its transitive deps (fontawesome, linguify) during import
+# resolution; a content/font error is tolerated (|| true) because the packages
+# are already cached by the time any content error fires.  The find assertions
+# confirm the packages actually landed — a build-time network failure makes the
+# image build fail loudly rather than silently shipping a broken container.
+RUN printf '#import "@preview/modern-cv:0.9.0": *\n#show: resume.with(author: (firstname: "Warm", lastname: "Up"))\nReady.\n' > /tmp/warm.typ \
+    && (typst compile /tmp/warm.typ /tmp/warm.pdf || true) \
+    && rm -f /tmp/warm.typ /tmp/warm.pdf \
+    && find / -path '*packages/preview/modern-cv/0.9.0/typst.toml' -print -quit | grep -q . \
+    && find / -path '*packages/preview/fontawesome/*/typst.toml' -print -quit | grep -q .
 
 # ---------------------------------------------------------------
 

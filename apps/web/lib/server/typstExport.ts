@@ -30,6 +30,16 @@ function hardenedEnv(): NodeJS.ProcessEnv {
   }
 }
 
+/**
+ * Extract the last ~400 chars of stderr from a child-process error so that
+ * the most relevant lines (e.g. the typst "error:" line) are surfaced in logs
+ * and API responses without flooding them.
+ */
+export function stderrTail(err: Error & { stderr?: string; stdout?: string }, maxLen = 400): string {
+  const raw = err.stderr ?? err.message ?? ''
+  return raw.length > maxLen ? raw.slice(-maxLen) : raw
+}
+
 const TYPST_BIN = process.env.GHOSTED_TYPST_BIN ?? 'typst'
 const PYTHON3_BIN = process.env.GHOSTED_PYTHON3_BIN ?? 'python3'
 // CWD of the web app at runtime (Next.js sets this to the project root)
@@ -536,11 +546,11 @@ export async function runExport(input: RunExportInput): Promise<ExportResult> {
   await Promise.all([
     execFile(TYPST_BIN, ['compile', resumeTypPath, resumePdfPath], { env }).catch((err) => {
       const e2 = err as Error & { stderr?: string; stdout?: string }
-      throw new Error(`typst compile resume failed: ${(e2.stderr ?? e2.message).slice(0, 500)}`)
+      throw new Error(`typst compile resume failed: ${stderrTail(e2)}`)
     }),
     execFile(TYPST_BIN, ['compile', coverTypPath, coverPdfPath], { env }).catch((err) => {
       const e2 = err as Error & { stderr?: string; stdout?: string }
-      throw new Error(`typst compile cover failed: ${(e2.stderr ?? e2.message).slice(0, 500)}`)
+      throw new Error(`typst compile cover failed: ${stderrTail(e2)}`)
     }),
   ])
 
@@ -577,8 +587,7 @@ async function runAtsValidator(
       return { pass: false, report: (e2.stdout ?? '').trim() }
     }
     // Exit 2 = usage / extraction error — hard failure
-    const detail = (e2.stderr ?? e2.message ?? '').slice(0, 500)
-    throw new Error(`ATS validator error (exit ${e2.code ?? '?'}): ${detail}`)
+    throw new Error(`ATS validator error (exit ${e2.code ?? '?'}): ${stderrTail(e2)}`)
   }
 }
 

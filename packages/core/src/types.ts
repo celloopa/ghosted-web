@@ -123,6 +123,18 @@ export interface Materials {
   exported_at?: string
   /** Application-form Q&A: the user pastes a question, the model drafts an answer. */
   qa?: { question: string; answer: string; added_at?: string }[]
+  /** Draft history: snapshots of content fields, newest first, capped at 10. */
+  history?: MaterialsSnapshot[]
+}
+
+/** A point-in-time snapshot of the editable content fields of Materials (no nested history). */
+export interface MaterialsSnapshot {
+  summary?: string
+  cover_letter?: string
+  resume_rewrites?: { source: string; rewrite: string; why: string }[]
+  opportunity_angles?: { title: string; evidence: string; use: string }[]
+  standout_suggestions?: { title: string; action: string; effort: 'low' | 'medium' | 'high' }[]
+  at: string
 }
 
 export interface TransitionError {
