@@ -3,7 +3,7 @@
 // The LLM call (text → JSON Resume) happens elsewhere via /api/generate.
 
 import { execFile as _execFile } from 'node:child_process'
-import { writeFile, unlink } from 'node:fs/promises'
+import { writeFile, readFile, unlink, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -33,6 +33,9 @@ const MAX_COMBINED_CHARS = 60_000
 const PDFTOTEXT_BIN = process.env.GHOSTED_PDFTOTEXT_BIN ?? 'pdftotext'
 const PDFTOTEXT_TIMEOUT_MS = 4_000
 const PDFTOTEXT_MAX_BUFFER = 10 * 1024 * 1024   // 10 MB stdout buffer
+const PDFTOPPM_BIN = process.env.GHOSTED_PDFTOPPM_BIN ?? 'pdftoppm'
+const PDFTOPPM_TIMEOUT_MS = 20_000
+const PDFTOPPM_MAX_PAGES = 6
 
 // PDF magic bytes: %PDF
 const PDF_MAGIC = Buffer.from([0x25, 0x50, 0x44, 0x46])
@@ -161,6 +164,98 @@ export function sanitizeText(s: string): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// computePageCount — PURE, no IO
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Estimate total page count for a set of sources.
+ * PDFs: counted as 1 page each (pdftotext does not expose page count; the
+ * vision path uses pdftoppm to render actual pages, which is the ground truth).
+ * Text sources: treated as having no pages (they never need vision).
+ * Returns 1 at minimum so callers can safely divide by it.
+ * PURE — safe to unit test without any IO.
+ */
+export function computePageCount(sources: CVSource[]): number {
+  const pdfCount = sources.filter((s) => s.kind === 'pdf').length
+  return Math.max(1, pdfCount)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// renderPdfPages — async, shells out to pdftoppm
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Render up to `maxPages` pages of a base64-encoded PDF to PNG images.
+ * Each page becomes a base64-encoded PNG string.
+ *
+ * Uses pdftoppm (poppler) at GHOSTED_PDFTOPPM_BIN or 'pdftoppm'.
+ * Temp files are always cleaned up (finally block).
+ * Throws a descriptive Error on failure so the caller can catch it cleanly.
+ */
+export async function renderPdfPages(
+  pdfBase64: string,
+  maxPages = PDFTOPPM_MAX_PAGES,
+): Promise<{ pageImagesBase64: string[]; pageCount: number }> {
+  const uid = randomUUID()
+  const tmpPdf = join(tmpdir(), `cv-vision-${uid}.pdf`)
+  const outPrefix = join(tmpdir(), `cv-vision-${uid}-page`)
+  const env = hardenedEnv()
+
+  try {
+    const decoded = Buffer.from(pdfBase64, 'base64')
+    await writeFile(tmpPdf, decoded)
+
+    // pdftoppm -png -r 150 -f 1 -l <maxPages> <input> <output-prefix>
+    // Produces files: <outPrefix>-1.png, <outPrefix>-2.png, …
+    await execFile(
+      PDFTOPPM_BIN,
+      ['-png', '-r', '150', '-f', '1', '-l', String(maxPages), tmpPdf, outPrefix],
+      { env, timeout: PDFTOPPM_TIMEOUT_MS, maxBuffer: 50 * 1024 * 1024 },
+    )
+
+    // Collect produced PNG files — pdftoppm names them <prefix>-<N>.png
+    // where N is zero-padded to the number of digits needed for the page count.
+    const dir = tmpdir()
+    const prefix = `cv-vision-${uid}-page-`
+    const all = await readdir(dir)
+    const pageFiles = all
+      .filter((f) => f.startsWith(prefix) && f.endsWith('.png'))
+      .sort()
+
+    if (pageFiles.length === 0) {
+      throw new Error('pdftoppm produced no PNG files — the PDF may be empty or corrupt')
+    }
+
+    const pageImagesBase64: string[] = []
+    for (const file of pageFiles) {
+      const buf = await readFile(join(dir, file))
+      pageImagesBase64.push(buf.toString('base64'))
+    }
+
+    return { pageImagesBase64, pageCount: pageImagesBase64.length }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    throw new Error(`renderPdfPages failed: ${msg}`)
+  } finally {
+    // Clean up the source PDF
+    await unlink(tmpPdf).catch(() => undefined)
+    // Clean up produced PNGs
+    try {
+      const dir = tmpdir()
+      const prefix = `cv-vision-${uid}-page-`
+      const all = await readdir(dir)
+      await Promise.all(
+        all
+          .filter((f) => f.startsWith(prefix) && f.endsWith('.png'))
+          .map((f) => unlink(join(dir, f)).catch(() => undefined)),
+      )
+    } catch {
+      // best-effort cleanup
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // extractFromSources — async, shells out to pdftotext
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -189,12 +284,17 @@ function hasPdfMagic(buf: Buffer): boolean {
  * - 'pdf' sources are written to a temp file, then pdftotext is run on them.
  * - DOCX or non-PDF binary is skipped with a warning.
  *
- * Returns combined text (capped at MAX_COMBINED_CHARS) and any warning strings.
+ * Returns combined text (capped at MAX_COMBINED_CHARS), any warning strings,
+ * and a `needsVision` flag (true when pdftotext output is too thin to trust).
  * Single pdftotext failures push a warning and continue (non-fatal).
+ *
+ * NOTE: `needsVision` uses isPoorExtraction from @ghosted/core, imported lazily
+ * so the function still compiles even before core exports it. Falls back to
+ * false when the import is unavailable.
  */
 export async function extractFromSources(
   sources: CVSource[],
-): Promise<{ text: string; warnings: string[] }> {
+): Promise<{ text: string; warnings: string[]; needsVision: boolean }> {
   const warnings: string[] = []
   const parts: string[] = []
   const env = hardenedEnv()
@@ -257,5 +357,18 @@ export async function extractFromSources(
     combined = combined.slice(0, MAX_COMBINED_CHARS)
   }
 
-  return { text: combined.trim(), warnings }
+  const finalText = combined.trim()
+
+  // Compute needsVision via isPoorExtraction from @ghosted/core.
+  // Import is direct (core is always in the workspace); we only guard defensively.
+  let needsVision = false
+  try {
+    const { isPoorExtraction } = await import('@ghosted/core')
+    const pageCount = computePageCount(sources)
+    needsVision = isPoorExtraction(finalText, pageCount)
+  } catch {
+    // Core not yet exporting isPoorExtraction — keep needsVision false.
+  }
+
+  return { text: finalText, warnings, needsVision }
 }

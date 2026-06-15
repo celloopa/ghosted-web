@@ -1324,3 +1324,25 @@ a {
   .cvr-entry-head { flex-direction: column; }
   .cvr-date { max-width: 100%; }
 }
+
+/* ── CVBuilder upload-path additions ──────────────────────────── */
+
+.cvb-multi-hint {
+  margin: 2px 0 6px;
+}
+
+.cvb-vision-note {
+  margin: 6px 0;
+  color: var(--text-muted);
+}
+
+.cvb-vision-escape {
+  margin-top: 8px;
+}
+
+.cvb-vision-escape .btn-link {
+  font-size: inherit;
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-decoration-color: var(--border-subtle);
+}

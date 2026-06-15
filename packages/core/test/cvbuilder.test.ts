@@ -3,6 +3,8 @@ import {
   INTERVIEW_QUESTIONS,
   buildCVExtractPrompt,
   buildCVInterviewPrompt,
+  buildCVVisionPrompt,
+  isPoorExtraction,
   parseCVResult,
   cvToView,
   viewToCvJson,
@@ -389,5 +391,134 @@ describe('viewToCvJson', () => {
     expect(validation.summary.name).toBe('Cello Rondon')
     expect(validation.summary.workCount).toBeGreaterThan(0)
     expect(validation.summary.skillCount).toBeGreaterThan(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 7. isPoorExtraction
+// ---------------------------------------------------------------------------
+
+describe('isPoorExtraction', () => {
+  it('empty string → true', () => {
+    expect(isPoorExtraction('', 1)).toBe(true)
+  })
+
+  it('whitespace-only string → true', () => {
+    expect(isPoorExtraction('   \n\t  ', 1)).toBe(true)
+  })
+
+  it('tiny text (< 200 chars) → true regardless of page count', () => {
+    // 50 chars, 1 page
+    expect(isPoorExtraction('Jane Smith Senior Engineer Acme Corp 2020 2023 Go', 1)).toBe(true)
+  })
+
+  it('exactly 199 trimmed chars → true', () => {
+    const text = 'a'.repeat(199)
+    expect(isPoorExtraction(text, 1)).toBe(true)
+  })
+
+  it('exactly 200 trimmed chars, 1 page → false (chars/page = 200 ≥ 120)', () => {
+    const text = 'a'.repeat(200)
+    expect(isPoorExtraction(text, 1)).toBe(false)
+  })
+
+  it('healthy 2-page résumé text → false', () => {
+    // Real résumé extract: well over 200 chars, and (chars/pages) > 120
+    const twoPageText = `
+      Jane Smith
+      Senior Software Engineer | jane@example.com | +1 555 000 1234 | San Francisco, CA
+      GitHub: github.com/janesmith | LinkedIn: linkedin.com/in/janesmith
+
+      Experience
+      Acme Corp — Senior Engineer (2020–2023)
+      • Led migration of monolith to microservices, reducing deployment time by 60%
+      • Mentored team of 4 engineers
+      • Owned Stripe payments integration serving 50k users
+
+      Startup XYZ — Engineer (2017–2020)
+      • Built real-time dashboard in React and Go
+      • Reduced p99 latency from 2 s to 180 ms through query optimisation
+
+      Skills: Go, TypeScript, React, PostgreSQL, Kubernetes, Docker, Terraform
+
+      Education
+      University of California, Berkeley — BS Computer Science, 2017
+    `.repeat(2)
+    expect(isPoorExtraction(twoPageText, 2)).toBe(false)
+  })
+
+  it('1-page text of exactly 150 chars → true (< 200 threshold)', () => {
+    const text = 'b'.repeat(150)
+    expect(isPoorExtraction(text, 1)).toBe(true)
+  })
+
+  it('text ≥ 200 chars but thin per-page (chars/page < 120) → true', () => {
+    // 240 chars across 3 pages → 80 chars/page < 120
+    const text = 'x'.repeat(240)
+    expect(isPoorExtraction(text, 3)).toBe(true)
+  })
+
+  it('text ≥ 200 chars, chars/page exactly 120 → false (at threshold = ok)', () => {
+    // 360 chars across 3 pages → exactly 120 chars/page
+    const text = 'x'.repeat(360)
+    expect(isPoorExtraction(text, 3)).toBe(false)
+  })
+
+  it('whitespace is normalised before length check', () => {
+    // 300 chars of 'a' separated by many spaces → trimmed length still counts
+    const text = '  ' + 'a'.repeat(198) + '  '
+    // trimmed = 198 chars → < 200 → true
+    expect(isPoorExtraction(text, 1)).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 8. buildCVVisionPrompt
+// ---------------------------------------------------------------------------
+
+describe('buildCVVisionPrompt', () => {
+  it('contains the never-invent rule', () => {
+    const prompt = buildCVVisionPrompt()
+    expect(prompt.toLowerCase()).toMatch(/never invent|do not invent/i)
+  })
+
+  it('contains the JSON-only envelope', () => {
+    const prompt = buildCVVisionPrompt()
+    expect(prompt.toLowerCase()).toMatch(/respond with only|only.*json|no prose|no code fence/i)
+  })
+
+  it('describes the JSON Resume shape keys: basics, work, skills, education', () => {
+    const prompt = buildCVVisionPrompt()
+    expect(prompt).toContain('basics')
+    expect(prompt).toContain('work')
+    expect(prompt).toContain('skills')
+    expect(prompt).toContain('education')
+  })
+
+  it('mentions images / pages of the résumé (since images are attached by caller)', () => {
+    const prompt = buildCVVisionPrompt()
+    expect(prompt.toLowerCase()).toMatch(/image|page/i)
+  })
+
+  it('instructs to omit ambiguous/unreadable text rather than guess', () => {
+    const prompt = buildCVVisionPrompt()
+    expect(prompt.toLowerCase()).toMatch(/omit|unreadable|ambiguous/i)
+  })
+
+  it('without existingCvJson: does NOT contain a merge instruction', () => {
+    const prompt = buildCVVisionPrompt()
+    expect(prompt.toLowerCase()).not.toMatch(/merge into|merging into/i)
+  })
+
+  it('with existingCvJson: includes merge instruction and the existing JSON', () => {
+    const existing = JSON.stringify({ basics: { name: 'Cello' }, work: [] })
+    const prompt = buildCVVisionPrompt({ existingCvJson: existing })
+    expect(prompt).toContain(existing)
+    expect(prompt.toLowerCase()).toMatch(/merge|existing.*json|prefer.*existing/i)
+  })
+
+  it('with pageCount: mentions the count in the prompt', () => {
+    const prompt = buildCVVisionPrompt({ pageCount: 3 })
+    expect(prompt).toContain('3')
   })
 })

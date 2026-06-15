@@ -27,6 +27,11 @@ export interface CVBuilderProps {
 type Mode = 'interview' | 'upload' | 'json'
 type Stage = 'mode-select' | 'build' | 'review'
 
+// Upload-path busy state strings
+type UploadBusyState = false | 'reading' | 'vision' | 'building'
+
+type CVSource = { kind: 'pdf' | 'text'; data: string; filename?: string }
+
 export function CVBuilder({ cvJson, onConfirm }: CVBuilderProps) {
   const { auth, connect } = useAIAuth()
   const { model: chosenModel } = useModelChoice()
@@ -38,10 +43,14 @@ export function CVBuilder({ cvJson, onConfirm }: CVBuilderProps) {
   const [lastExtractText, setLastExtractText] = useState<string | null>(null)
 
   // Upload-path state
-  const [uploadBusy, setUploadBusy] = useState(false)
+  const [uploadBusy, setUploadBusy] = useState<UploadBusyState>(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadWarnings, setUploadWarnings] = useState<string[]>([])
   const [pasteText, setPasteText] = useState('')
+  // Vision note shown when auto-fallback fires
+  const [visionNote, setVisionNote] = useState<string | null>(null)
+  // Keep sources in state so re-runs need no re-upload
+  const [lastSources, setLastSources] = useState<CVSource[] | null>(null)
 
   // Paste-JSON path state
   const [jsonText, setJsonText] = useState(cvJson ?? '')
@@ -69,14 +78,61 @@ export function CVBuilder({ cvJson, onConfirm }: CVBuilderProps) {
     return data.text
   }
 
+  async function runVisionPath(sources: CVSource[]): Promise<void> {
+    setUploadBusy('vision')
+    setUploadError(null)
+
+    const visionRes = await fetch('/api/cv/vision', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...(auth ? { auth } : {}),
+        ...(chosenModel ? { model: chosenModel } : {}),
+        sources,
+      }),
+    })
+    const visionData = (await visionRes.json()) as { text?: string; warnings?: string[]; error?: string }
+
+    if (!visionRes.ok || !visionData.text) {
+      const msg = visionData.error ?? 'Could not read the page images.'
+      // Detect local-CLI-can't-read messages and point to API key
+      if (msg.toLowerCase().includes('local') || msg.toLowerCase().includes('api key') || msg.toLowerCase().includes('connect')) {
+        setUploadError(`${msg} Connect an API key to use the image-reading path.`)
+      } else {
+        setUploadError(msg)
+      }
+      return
+    }
+
+    if (visionData.warnings?.length) {
+      setUploadWarnings((prev) => [...prev, ...visionData.warnings!])
+    }
+
+    const result = parseCVResult(visionData.text)
+    if (!result.ok) {
+      setUploadError(`Could not build a CV from the page images: ${result.error}. Try pasting the text instead.`)
+      return
+    }
+
+    const view = cvToView(result.cvJson)
+    if (!view) {
+      setUploadError('The page images did not contain a recognisable name. Check the résumé and try again.')
+      return
+    }
+
+    setReviewView(view)
+    setStage('review')
+  }
+
   async function handleUpload() {
     setUploadError(null)
     setUploadWarnings([])
-    setUploadBusy(true)
+    setVisionNote(null)
+    setUploadBusy('reading')
 
     try {
       // Collect sources
-      const sources: { kind: 'text' | 'pdf'; data: string; filename?: string }[] = []
+      const sources: CVSource[] = []
 
       const fileInput = document.getElementById('cvb-file') as HTMLInputElement | null
       const files = fileInput?.files ?? ([] as unknown as FileList)
@@ -93,13 +149,17 @@ export function CVBuilder({ cvJson, onConfirm }: CVBuilderProps) {
       }
 
       if (pasteText.trim()) {
-        sources.push({ kind: 'text', data: pasteText })
+        sources.push({ kind: 'text', data: pasteText, filename: 'pasted' })
       }
 
       if (sources.length === 0) {
         setUploadError('Please pick a file or paste your résumé text.')
+        setUploadBusy(false)
         return
       }
+
+      // Save sources for later re-runs (vision escape hatch or manual retry)
+      setLastSources(sources)
 
       // Extract text from files
       const extractRes = await fetch('/api/cv/extract', {
@@ -107,9 +167,15 @@ export function CVBuilder({ cvJson, onConfirm }: CVBuilderProps) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ sources }),
       })
-      const extractData = (await extractRes.json()) as { text?: string; warnings?: string[]; error?: string }
-      if (!extractRes.ok || !extractData.text) {
+      const extractData = (await extractRes.json()) as {
+        text?: string
+        warnings?: string[]
+        needsVision?: boolean
+        error?: string
+      }
+      if (!extractRes.ok) {
         setUploadError(extractData.error ?? 'Could not read the file.')
+        setUploadBusy(false)
         return
       }
 
@@ -117,9 +183,23 @@ export function CVBuilder({ cvJson, onConfirm }: CVBuilderProps) {
         setUploadWarnings(extractData.warnings)
       }
 
+      // Automatic vision fallback
+      if (extractData.needsVision) {
+        setVisionNote('This résumé looks image-based — reading it from the page images instead.')
+        await runVisionPath(sources)
+        return
+      }
+
+      if (!extractData.text) {
+        setUploadError('Could not read the file.')
+        setUploadBusy(false)
+        return
+      }
+
       setLastExtractText(extractData.text)
 
       // Build CV from text
+      setUploadBusy('building')
       const prompt = buildCVExtractPrompt(extractData.text)
       const raw = await callModel(prompt)
       const result = parseCVResult(raw)
@@ -144,9 +224,21 @@ export function CVBuilder({ cvJson, onConfirm }: CVBuilderProps) {
     }
   }
 
+  async function handleRunVision() {
+    if (!lastSources) return
+    setUploadError(null)
+    setVisionNote(null)
+    setUploadWarnings([])
+    try {
+      await runVisionPath(lastSources)
+    } finally {
+      setUploadBusy(false)
+    }
+  }
+
   async function handleRegenerateFromText() {
     if (!lastExtractText) return
-    setUploadBusy(true)
+    setUploadBusy('building')
     setUploadError(null)
     try {
       const prompt = buildCVExtractPrompt(lastExtractText)
@@ -183,23 +275,51 @@ export function CVBuilder({ cvJson, onConfirm }: CVBuilderProps) {
     onConfirm(json)
   }
 
+  const isBusy = uploadBusy !== false
+
+  function busyLabel(): string {
+    if (uploadBusy === 'reading') return 'Reading…'
+    if (uploadBusy === 'vision') return 'Looking at the pages…'
+    if (uploadBusy === 'building') return 'Building…'
+    return 'Read my résumé'
+  }
+
   // In review stage — show CVReview
   if (stage === 'review' && reviewView) {
     return (
-      <CVReview
-        initial={reviewView}
-        onConfirm={handleConfirmReview}
-        onStartOver={() => {
-          setStage('mode-select')
-          setReviewView(null)
-        }}
-        onRegenerate={
-          mode === 'upload' && lastExtractText
-            ? () => void handleRegenerateFromText()
-            : undefined
-        }
-        busy={uploadBusy}
-      />
+      <>
+        {lastSources && (
+          <p className="cvb-vision-escape dim small">
+            Didn&rsquo;t read right?{' '}
+            <button
+              className="btn-link"
+              disabled={isBusy}
+              onClick={() => void handleRunVision()}
+            >
+              Read it from the page images instead
+            </button>
+          </p>
+        )}
+        <CVReview
+          initial={reviewView}
+          onConfirm={handleConfirmReview}
+          onStartOver={() => {
+            setStage('mode-select')
+            setReviewView(null)
+          }}
+          onRegenerate={
+            mode === 'upload' && lastExtractText
+              ? () => void handleRegenerateFromText()
+              : undefined
+          }
+          busy={isBusy}
+        />
+        {uploadError && (
+          <p className="form-error" role="alert">
+            {uploadError}
+          </p>
+        )}
+      </>
     )
   }
 
@@ -281,15 +401,16 @@ export function CVBuilder({ cvJson, onConfirm }: CVBuilderProps) {
           <div className="cvb-model-row row gap">
             <ModelPicker />
           </div>
-          <label className="field">
-            <span className="field-label">Your résumé file (PDF, TXT, or Markdown)</span>
+          <div className="field">
+            <label htmlFor="cvb-file" className="field-label">Your résumé file (PDF, TXT, or Markdown)</label>
+            <p className="dim small cvb-multi-hint">Add one or more résumés — even a few versions. We read them all.</p>
             <input
               id="cvb-file"
               type="file"
               accept=".pdf,.txt,.md,text/plain,application/pdf,text/markdown"
               multiple
             />
-          </label>
+          </div>
           <label className="field">
             <span className="field-label">Or paste your résumé text</span>
             <textarea
@@ -300,6 +421,11 @@ export function CVBuilder({ cvJson, onConfirm }: CVBuilderProps) {
               onChange={(e) => setPasteText(e.target.value)}
             />
           </label>
+          {visionNote && (
+            <p className="dim small cvb-vision-note" role="status">
+              {visionNote}
+            </p>
+          )}
           {uploadWarnings.length > 0 && (
             <p className="dim small cvb-warnings">
               {uploadWarnings.join(' · ')}
@@ -313,12 +439,23 @@ export function CVBuilder({ cvJson, onConfirm }: CVBuilderProps) {
           <div className="row gap section">
             <button
               className="btn btn-primary"
-              disabled={uploadBusy}
+              disabled={isBusy}
               onClick={() => void handleUpload()}
             >
-              {uploadBusy ? 'Reading…' : 'Read my résumé'}
+              {busyLabel()}
             </button>
           </div>
+          {lastSources && !isBusy && (
+            <p className="dim small cvb-vision-escape">
+              Didn&rsquo;t read right?{' '}
+              <button
+                className="btn-link"
+                onClick={() => void handleRunVision()}
+              >
+                Read it from the page images instead
+              </button>
+            </p>
+          )}
         </div>
       )}
 

@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   // ── Extract text ──────────────────────────────────────────────────────────
 
   const started = Date.now()
-  const { text, warnings } = await extractFromSources(validation.sources)
+  const { text, warnings, needsVision } = await extractFromSources(validation.sources)
   const ms = Date.now() - started
 
   if (!text) {
@@ -32,11 +32,12 @@ export async function POST(req: NextRequest) {
         sources: validation.sources.length,
         chars: 0,
         warnings: warnings.length,
+        needsVision,
         ms,
       }),
     )
     return NextResponse.json(
-      { error: 'no readable text found', warnings },
+      { error: 'no readable text found', warnings, needsVision: true },
       { status: 422 },
     )
   }
@@ -47,9 +48,10 @@ export async function POST(req: NextRequest) {
       sources: validation.sources.length,
       chars: text.length,
       warnings: warnings.length,
+      needsVision,
       ms,
     }),
   )
 
-  return NextResponse.json({ text, warnings })
+  return NextResponse.json({ text, warnings, needsVision })
 }

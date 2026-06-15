@@ -435,6 +435,66 @@ export function cvToView(cvJson: string): CVView | null {
   }
 }
 
+// ---------------------------------------------------------------------------
+// isPoorExtraction
+// ---------------------------------------------------------------------------
+
+/**
+ * Heuristic: return true when pdftotext output is too thin to trust.
+ *
+ * Rules (applied in order):
+ *  1. Normalize whitespace: trim the full string.
+ *  2. If trimmed length < 200 → poor (true).
+ *  3. If (trimmed length / pageCount) < 120 → poor (true).
+ *  4. Otherwise → ok (false).
+ *
+ * Rationale: a real 1-page résumé typically extracts 1500+ chars; a scanned /
+ * image-only page extracts near-zero. The per-page check catches multi-page
+ * scanned PDFs that happen to have a large page count but almost no text.
+ */
+export function isPoorExtraction(text: string, pageCount: number): boolean {
+  const trimmed = text.trim()
+  if (trimmed.length < 200) return true
+  if (trimmed.length / pageCount < 120) return true
+  return false
+}
+
+// ---------------------------------------------------------------------------
+// buildCVVisionPrompt
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the system/user instruction that accompanies page images when using
+ * the vision fallback path (caller attaches the rendered PDF page images).
+ *
+ * Same discipline as buildCVExtractPrompt:
+ *  - Never invent roles, dates, employers, metrics, skills, or contact info.
+ *  - Omit fields that are ambiguous or unreadable rather than guessing.
+ *  - Emit ONLY the JSON Resume object — no prose, no code fences.
+ *
+ * When existingCvJson is provided, the model merges new evidence into it
+ * rather than starting from scratch.
+ */
+export function buildCVVisionPrompt(opts?: { pageCount?: number; existingCvJson?: string }): string {
+  const pageLabel =
+    opts?.pageCount != null
+      ? `These ${opts.pageCount} image${opts.pageCount === 1 ? '' : 's'} are the pages of a candidate's résumé.`
+      : "These images are the pages of a candidate's résumé."
+
+  const mergeBlock = opts?.existingCvJson
+    ? `\nYou are merging into an existing JSON Resume. Prefer existing non-empty values; add only new evidence visible in the images. Do not remove existing work, skills, or education unless the images explicitly contradict them.\n\nExisting JSON Resume:\n${clip(opts.existingCvJson, 8000)}\n`
+    : ''
+
+  return `${pageLabel} Read them and convert to a JSON Resume object.
+
+Transcribe ONLY what is visibly present in the images — never invent roles, dates, employers, metrics, skills, or contact info. Keep dates exactly as written. If text is ambiguous or unreadable, omit it rather than guessing.
+${mergeBlock}
+JSON Resume shape to emit:
+${JSON_RESUME_SHAPE}
+
+Respond with ONLY the JSON Resume object, no prose, no code fences.`
+}
+
 /**
  * Serialize a CVView back to a JSON Resume string.
  * The UI edits the view; this persists it as valid JSON Resume.
