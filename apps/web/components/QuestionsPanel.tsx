@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { checkAnswer } from '@ghosted/core'
 import type { Materials } from '@ghosted/core'
+import { ActionButton } from './ActionButton'
 
 type QAItem = NonNullable<Materials['qa']>[number]
 
@@ -18,7 +19,7 @@ export function QuestionsPanel({
 }: {
   qa: QAItem[]
   busy: boolean
-  onDraft: (question: string) => void
+  onDraft: (question: string) => Promise<unknown> | void
   onRevise: (index: number, instruction: string) => void
   onEdit: (index: number, answer: string) => void
   onRemove: (index: number) => void
@@ -32,10 +33,10 @@ export function QuestionsPanel({
   const [reviseDraft, setReviseDraft] = useState('')
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
 
-  function handleDraft() {
+  async function handleDraft() {
     const q = newQuestion.trim()
     if (!q || busy) return
-    onDraft(q)
+    await onDraft(q)
     setNewQuestion('')
   }
 
@@ -80,17 +81,17 @@ export function QuestionsPanel({
           placeholder="Paste a question from the application form…"
           value={newQuestion}
           onChange={(e) => setNewQuestion(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleDraft()}
+          onKeyDown={(e) => { if (e.key === 'Enter') void handleDraft() }}
           disabled={busy}
           aria-label="Application form question"
         />
-        <button
+        <ActionButton
           className="btn"
+          idleLabel="Draft answer"
+          runningLabel="Drafting…"
           disabled={busy || !newQuestion.trim()}
-          onClick={handleDraft}
-        >
-          {busy ? 'Drafting…' : 'Draft answer'}
-        </button>
+          onAct={handleDraft}
+        />
       </div>
 
       {/* Q&A cards */}

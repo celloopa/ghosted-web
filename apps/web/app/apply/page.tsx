@@ -17,14 +17,18 @@ import {
   parseAnswer,
   parseGeneration,
   parsePostingHTML,
+  parseTargetedRevision,
   planResume,
+  pushHistory,
   renderQuestionsDoc,
   renderResumeAdjustments,
+  buildTargetedRevisionPrompt,
   type Application,
   type FitReport,
   type GenerationInput,
   type HonestyReport,
   type Materials,
+  type MaterialsSnapshot,
   type PostingFacts,
   type RewriteDecision,
   type RoleType,
@@ -33,7 +37,9 @@ import { useApps } from '../../lib/useApps'
 import { useBaseline } from '../../lib/useBaseline'
 import { useAIAuth } from '../../lib/useAIAuth'
 import { useHosted } from '../../lib/useHosted'
+import { ActionButton } from '../../components/ActionButton'
 import { ConnectAI } from '../../components/ConnectAI'
+import { DraftHistory } from '../../components/DraftHistory'
 import { ModelPicker } from '../../components/ModelPicker'
 import { QuestionsPanel } from '../../components/QuestionsPanel'
 import { RewritesPanel } from '../../components/RewritesPanel'
@@ -377,6 +383,14 @@ function MaterialPanel({ title, kicker, children }: { title: string; kicker?: st
   )
 }
 
+// Quick targeted edits for the cover letter only (Feature: targeted revise).
+const LETTER_REVISE_CHIPS = [
+  'make it sharper',
+  'make it warmer',
+  'make it more specific',
+  'make it shorter',
+]
+
 function QuickEditChips({ onPick }: { onPick: (instruction: string) => void }) {
   const chips = [
     'make the cover letter sharper',
@@ -572,16 +586,19 @@ function Finale({
 
   const [instruction, setInstruction] = useState('')
   const [generating, setGenerating] = useState(false)
-  const [genError, setGenError] = useState<string | null>(null)
+  const [revising, setRevising] = useState(false)
+  const [reviseError, setReviseError] = useState<string | null>(null)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
   const [notes, setNotes] = useState(app.notes ?? '')
   const [confirmed, setConfirmed] = useState(false)
 
   // Export state
   const [exporting, setExporting] = useState(false)
-  const [exportError, setExportError] = useState<string | null>(null)
   const [exportResult, setExportResult] = useState<ExportResult | null>(null)
   const [exportedAt, setExportedAt] = useState<string | undefined>(undefined)
+
+  // Any in-flight model action — used to keep secondary controls disabled.
+  const busy = generating || revising || exporting
   const staleExport = isStaleExport(exportedAt, materials.generated_at)
 
   // Available fonts from typst
@@ -709,14 +726,13 @@ function Finale({
     downloadBlob(content, filename)
   }
 
-  async function generate(revisionInstruction?: string) {
-    setGenError(null)
+  // Regenerate every material from scratch. The current draft is snapshotted to
+  // history first, so a fresh start is never destructive. Throws on failure so
+  // the calling ActionButton can surface the error inline.
+  async function generate() {
     setGenerating(true)
     try {
-      const revision = revisionInstruction && materials.cover_letter
-        ? { current: materials, instruction: revisionInstruction }
-        : undefined
-      const prompt = buildGenerationPrompt(genInput, revision)
+      const prompt = buildGenerationPrompt(genInput)
       let result = await callModel(prompt)
 
       const check = checkCoverLetter(result.cover_letter)
@@ -730,8 +746,10 @@ function Finale({
         )
       }
 
+      const at = new Date().toISOString()
+      const base = materials.cover_letter ? pushHistory(materials, at) : materials
       const updated: Materials = {
-        ...materials,
+        ...base,
         summary: result.summary,
         cover_letter: result.cover_letter,
         resume_adjustments: renderResumeAdjustments(plan, { summary: result.summary, missing: posting.missing }),
@@ -739,22 +757,98 @@ function Finale({
         rewrite_decisions: undefined,
         opportunity_angles: result.opportunity_angles,
         standout_suggestions: result.standout_suggestions,
-        generated_at: new Date().toISOString(),
+        generated_at: at,
         model: chosenModel || (auth ? modelForAuth(auth) : undefined),
-        revisions: (materials.revisions ?? 0) + (revisionInstruction ? 1 : 0),
+        revisions: (materials.revisions ?? 0) + 1,
       }
       await updateApplication({ ...app, materials: updated })
       setInstruction('')
-    } catch (e) {
-      setGenError(e instanceof Error ? e.message : 'generation failed')
     } finally {
       setGenerating(false)
     }
   }
 
+  // One targeted pass over the cover letter. Returns just the revised letter.
+  async function reviseLetterOnce(current: string, focus: string): Promise<string> {
+    const prompt = buildTargetedRevisionPrompt(genInput, { target: 'cover_letter', current, instruction: focus })
+    const raw = await callModelRaw(prompt, 'revision')
+    const parsed = parseTargetedRevision(raw, 'cover_letter')
+    if (!parsed.ok) throw new Error(parsed.error)
+    return parsed.value
+  }
+
+  // Revise ONLY the cover letter, leaving every other material untouched. The
+  // prior draft is snapshotted to history first. Throws on failure.
+  async function reviseCoverLetter(rawInstruction: string) {
+    const current = materials.cover_letter
+    const focus = rawInstruction.trim()
+    if (!current || !focus) return
+    setRevising(true)
+    try {
+      let letter = await reviseLetterOnce(current, focus)
+      const check = checkCoverLetter(letter)
+      if (check.overLimit || check.banned.length > 0) {
+        const fixes = [
+          check.overLimit ? `the letter is ${check.words} words — cut it under ${180}` : '',
+          check.banned.length > 0 ? `it uses banned phrasing: ${check.banned.join('; ')} — remove` : '',
+        ].filter(Boolean).join('; ')
+        try {
+          letter = await reviseLetterOnce(letter, `Validator flagged: ${fixes}.`)
+        } catch {
+          // Keep the first revision if the correction round itself fails.
+        }
+      }
+      const at = new Date().toISOString()
+      const snapped = pushHistory(materials, at)
+      const updated: Materials = {
+        ...snapped,
+        cover_letter: letter,
+        generated_at: at,
+        model: chosenModel || (auth ? modelForAuth(auth) : undefined),
+        revisions: (materials.revisions ?? 0) + 1,
+      }
+      await updateApplication({ ...app, materials: updated })
+      setInstruction('')
+    } finally {
+      setRevising(false)
+    }
+  }
+
+  // Chip-triggered revise. Errors surface in the shared revise-error line below
+  // the chips (the dedicated Revise button surfaces its own error inline).
+  function reviseFromChip(chip: string) {
+    setReviseError(null)
+    void reviseCoverLetter(chip).catch((e) =>
+      setReviseError(e instanceof Error ? e.message : 'revision failed'),
+    )
+  }
+
+  // Restore a snapshot's content onto the live materials, snapshotting the
+  // current draft first so a restore is itself undoable. Never rejects.
+  async function restoreSnapshot(snap: MaterialsSnapshot) {
+    setReviseError(null)
+    try {
+      const at = new Date().toISOString()
+      const base = pushHistory(materials, at)
+      const restored: Materials = {
+        ...base,
+        summary: snap.summary,
+        cover_letter: snap.cover_letter,
+        resume_rewrites: snap.resume_rewrites,
+        rewrite_decisions: undefined,
+        opportunity_angles: snap.opportunity_angles,
+        standout_suggestions: snap.standout_suggestions,
+        resume_adjustments: renderResumeAdjustments(plan, { summary: snap.summary, missing: posting.missing }),
+        generated_at: at,
+      }
+      await updateApplication({ ...app, materials: restored })
+    } catch (e) {
+      setReviseError(e instanceof Error ? e.message : 'could not restore that version')
+    }
+  }
+
   async function exportPdfs() {
     if (!cvJson) return
-    setExportError(null)
     setExporting(true)
     try {
       const payload = buildExportPayload(app, cvJson, plan, style)
@@ -766,14 +860,12 @@ function Finale({
       const data = (await res.json()) as ExportResult & { error?: string }
       if (!res.ok || !data.resume) throw new Error(data.error ?? 'export failed')
       setExportResult(data)
-      const exportedAt = new Date().toISOString()
-      setExportedAt(exportedAt)
+      const exportedStamp = new Date().toISOString()
+      setExportedAt(exportedStamp)
       // Stamp exported_at onto materials so the detail page can detect staleness.
       if (app.materials) {
-        await updateApplication({ ...app, materials: { ...app.materials, exported_at: exportedAt } })
+        await updateApplication({ ...app, materials: { ...app.materials, exported_at: exportedStamp } })
       }
-    } catch (e) {
-      setExportError(e instanceof Error ? e.message : 'export failed')
     } finally {
       setExporting(false)
     }
@@ -804,6 +896,7 @@ function Finale({
 
   // Key the animation on generated_at so a regenerate re-staggerers the cards.
   const animKey = materials.generated_at ?? 'initial'
+  const nowISO = new Date().toISOString()
 
   const fitBadge = posting.fit_score >= 70
     ? <span className="badge kw-matched">{posting.fit_score}/100</span>
@@ -829,7 +922,7 @@ function Finale({
         step="materials"
         company={app.company}
         position={app.position}
-        status={generating ? 'Revising' : 'Materials ready'}
+        status={revising ? 'Revising letter' : generating ? 'Regenerating' : 'Materials ready'}
       />
 
       <div className="finale-header reveal">
@@ -838,30 +931,94 @@ function Finale({
       </div>
 
       {generating && (
-        <LoadingPanel title="Revising materials" detail="Applying your instruction and refreshing the documents." />
+        <LoadingPanel title="Regenerating materials" detail="Drafting a fresh cover letter, resume rewrites, opportunity angles, and standout moves." />
       )}
-      {genError && <p className="form-error" role="alert">{genError}</p>}
 
-      <div className="finale-cards" key={animKey}>
-        <FinaleDocCard
-          name={coverLetterName}
-          content={coverLetterContent}
-          className="reveal"
-          onCopy={() => copy('letter', coverLetterContent)}
-          copied={copiedKey === 'letter'}
-          warnings={
-            (letterCheck.banned.length > 0 || letterCheck.overLimit) ? (
-              <div className="row gap wrap" style={{ marginBottom: 8 }}>
-                {letterCheck.banned.map((b) => (
-                  <span key={b} className="badge kw-missing">banned: {b}</span>
-                ))}
-                {letterCheck.overLimit && (
-                  <span className="badge kw-missing">over {180} words ({letterCheck.words})</span>
-                )}
-              </div>
-            ) : undefined
-          }
-        />
+      {/* Cover letter — the centerpiece, read as a document */}
+      <section className="finale-section cover-letter-section reveal" key={animKey}>
+        <div className="finale-doc-head">
+          <span className="finale-doc-name">{coverLetterName}</span>
+          <div className="finale-doc-actions">
+            <span className="mono dim small">{letterCheck.words} words</span>
+            <button className="btn btn-small" onClick={() => copy('letter', coverLetterContent)}>
+              {copiedKey === 'letter' ? 'copied' : 'copy'}
+            </button>
+            <button className="btn btn-small" onClick={() => downloadBlob(coverLetterContent, coverLetterName)}>
+              download
+            </button>
+          </div>
+        </div>
+        {(letterCheck.banned.length > 0 || letterCheck.overLimit) && (
+          <div className="row gap wrap" style={{ marginBottom: 8 }}>
+            {letterCheck.banned.map((b) => (
+              <span key={b} className="badge kw-missing">banned: {b}</span>
+            ))}
+            {letterCheck.overLimit && (
+              <span className="badge kw-missing">over {180} words ({letterCheck.words})</span>
+            )}
+          </div>
+        )}
+        <div className="cover-letter-doc">{coverLetterContent || 'No letter yet. Use Regenerate everything to draft one.'}</div>
+
+        {/* Targeted cover-letter revision — changes ONLY the letter */}
+        <div className="letter-revise">
+          <p className="dim small" style={{ margin: '0 0 8px' }}>
+            Revise just the cover letter — the rest of your materials stay as they are.
+          </p>
+          <div className="quick-edit-chips">
+            {LETTER_REVISE_CHIPS.map((chip) => (
+              <button
+                key={chip}
+                className="chip quick-chip"
+                type="button"
+                disabled={busy}
+                onClick={() => reviseFromChip(chip)}
+              >
+                {chip}
+              </button>
+            ))}
+          </div>
+          <textarea
+            className="input revise-textarea"
+            placeholder={'Or describe the change — "lead with the systems work", "make the close warmer"…'}
+            value={instruction}
+            onChange={(e) => setInstruction(e.target.value)}
+          />
+          <div className="row gap" style={{ marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <ActionButton
+              className="btn btn-primary"
+              idleLabel="Revise letter"
+              runningLabel="Revising…"
+              disabled={busy || !instruction.trim()}
+              onAct={() => reviseCoverLetter(instruction)}
+            />
+            <div className="model-picker-inline">
+              <ModelPicker />
+            </div>
+          </div>
+          {reviseError && <p className="form-error" role="alert" style={{ marginTop: 8 }}>{reviseError}</p>}
+        </div>
+
+        {/* Look back at and restore earlier drafts */}
+        <DraftHistory history={materials.history ?? []} onRestore={restoreSnapshot} nowISO={nowISO} />
+
+        {/* Secondary: start over from scratch */}
+        <div className="regen-everything">
+          <p className="dim small" style={{ margin: '0 0 8px' }}>
+            Want a clean slate? Regenerate every material from scratch — your current draft is saved to history first.
+          </p>
+          <ActionButton
+            className="btn"
+            idleLabel="Regenerate everything"
+            runningLabel="Generating…"
+            disabled={busy}
+            onAct={() => generate()}
+          />
+        </div>
+      </section>
+
+      {/* Resume adjustments */}
+      <div className="finale-cards" key={`adj-${animKey}`}>
         <FinaleDocCard
           name={resumeAdjName}
           content={resumeAdjContent}
@@ -923,20 +1080,19 @@ function Finale({
             </p>
 
             <div className="row gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-              <button
+              <ActionButton
                 className="btn btn-progress"
-                disabled={exporting}
-                onClick={() => void exportPdfs()}
-              >
-                {exporting ? 'Rendering…' : 'Export PDFs (Typst)'}
-              </button>
+                idleLabel="Export PDFs (Typst)"
+                runningLabel="Rendering…"
+                disabled={busy}
+                onAct={() => exportPdfs()}
+              />
               {staleExport && !exporting && (
                 <span className="dim small" data-testid="stale-export-hint">
                   letter changed since last export — re-export for fresh PDFs
                 </span>
               )}
             </div>
-            {exportError && <p className="form-error" role="alert" style={{ marginTop: 8 }}>{exportError}</p>}
             {exportResult && (
               <div className="export-results" data-testid="export-results">
                 <ExportResultCard
@@ -961,33 +1117,13 @@ function Finale({
         <QuestionsPanel
           qa={app.materials?.qa ?? []}
           busy={qaGenerating}
-          onDraft={(question) => void draftAnswer(question)}
+          onDraft={(question) => draftAnswer(question)}
           onRevise={(index, instruction) => void reviseAnswer(index, instruction)}
           onEdit={(index, answer) => void editAnswer(index, answer)}
           onRemove={(index) => void removeAnswer(index)}
           onCopy={(text) => copy('qa', text)}
           onDownloadAll={downloadQuestionsDoc}
         />
-      </div>
-
-      <div className="finale-section reveal-3">
-        <h3 className="section-title">Anything to adjust?</h3>
-        <QuickEditChips onPick={(chip) => generate(chip)} />
-        <div className="row gap revision-row" style={{ marginTop: 8 }}>
-          <input
-            className="input"
-            placeholder='Focused edit — "sharpen the opening", "lead with motion work"…'
-            value={instruction}
-            onChange={(e) => setInstruction(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && instruction.trim() && generate(instruction.trim())}
-          />
-          <button className="btn" disabled={generating || !instruction.trim()} onClick={() => generate(instruction.trim())}>
-            Revise
-          </button>
-          <div className="model-picker-inline">
-            <ModelPicker />
-          </div>
-        </div>
       </div>
 
       <div className="finale-section reveal-4">
@@ -1003,7 +1139,7 @@ function Finale({
 
       <div className="finale-actions reveal-4">
         {actions.showMarkApplied && (
-          <button className="btn btn-primary btn-progress" disabled={generating} onClick={() => void finalize()}>
+          <button className="btn btn-primary btn-progress" disabled={busy} onClick={() => void finalize()}>
             Done — mark applied
           </button>
         )}
@@ -1059,6 +1195,7 @@ function Workspace({ app }: { app: Application }) {
   )
 
   const letterCheck = app.materials?.cover_letter ? checkCoverLetter(app.materials.cover_letter) : null
+  const nowISO = new Date().toISOString()
 
   const genInput: GenerationInput = useMemo(() => ({
     company: app.company,
@@ -1102,8 +1239,9 @@ function Workspace({ app }: { app: Application }) {
     return parsed
   }
 
+  // Throws on failure so a calling ActionButton can surface the error inline.
+  // The prior draft is snapshotted to history before it is overwritten.
   async function generate(revisionInstruction?: string) {
-    setGenError(null)
     setGenerating(true)
     try {
       const revision =
@@ -1128,8 +1266,10 @@ function Workspace({ app }: { app: Application }) {
         )
       }
 
+      const at = new Date().toISOString()
+      const base = app.materials?.cover_letter ? pushHistory(app.materials, at) : app.materials
       const materials: Materials = {
-        ...app.materials,
+        ...base,
         summary: result.summary,
         cover_letter: result.cover_letter,
         resume_adjustments: renderResumeAdjustments(plan, { summary: result.summary, missing: posting.missing }),
@@ -1138,7 +1278,7 @@ function Workspace({ app }: { app: Application }) {
         rewrite_decisions: undefined,
         opportunity_angles: result.opportunity_angles,
         standout_suggestions: result.standout_suggestions,
-        generated_at: new Date().toISOString(),
+        generated_at: at,
         model: chosenModel || (auth ? modelForAuth(auth) : undefined),
         revisions: (app.materials?.revisions ?? 0) + (revisionInstruction ? 1 : 0),
       }
@@ -1146,10 +1286,37 @@ function Workspace({ app }: { app: Application }) {
       setInstruction('')
       // Advance to finale on successful generation.
       setView('finale')
-    } catch (e) {
-      setGenError(e instanceof Error ? e.message : 'generation failed')
     } finally {
       setGenerating(false)
+    }
+  }
+
+  // Non-ActionButton callers (quick chips, Enter key) route through here so a
+  // rejection is caught and shown rather than left unhandled.
+  function runGenerate(instr?: string) {
+    setGenError(null)
+    void generate(instr).catch((e) => setGenError(e instanceof Error ? e.message : 'generation failed'))
+  }
+
+  async function restoreSnapshot(snap: MaterialsSnapshot) {
+    setGenError(null)
+    try {
+      const at = new Date().toISOString()
+      const base = pushHistory(app.materials!, at)
+      const restored: Materials = {
+        ...base,
+        summary: snap.summary,
+        cover_letter: snap.cover_letter,
+        resume_rewrites: snap.resume_rewrites,
+        rewrite_decisions: undefined,
+        opportunity_angles: snap.opportunity_angles,
+        standout_suggestions: snap.standout_suggestions,
+        resume_adjustments: renderResumeAdjustments(plan, { summary: snap.summary, missing: posting.missing }),
+        generated_at: at,
+      }
+      await updateApplication({ ...app, materials: restored })
+    } catch (e) {
+      setGenError(e instanceof Error ? e.message : 'could not restore that version')
     }
   }
 
@@ -1277,27 +1444,36 @@ function Workspace({ app }: { app: Application }) {
                   <div className="model-picker-inline">
                     <ModelPicker />
                   </div>
-                  <button className="btn btn-primary" disabled={generating} onClick={() => generate()}>
-                    {generating ? 'Writing…' : app.materials?.cover_letter ? 'Regenerate all' : 'Generate materials'}
-                  </button>
+                  <ActionButton
+                    className="btn btn-primary"
+                    idleLabel={app.materials?.cover_letter ? 'Regenerate all' : 'Generate materials'}
+                    runningLabel={app.materials?.cover_letter ? 'Generating…' : 'Writing…'}
+                    disabled={generating}
+                    onAct={() => generate()}
+                  />
                 </div>
               </div>
 
               {app.materials?.cover_letter && (
                 <>
-                  <QuickEditChips onPick={(chip) => generate(chip)} />
+                  <QuickEditChips onPick={(chip) => runGenerate(chip)} />
                   <div className="row gap revision-row">
                     <input
                       className="input"
                       placeholder={'Focused edit — "make the standout ideas more visual", "tighten resume rewrites"…'}
                       value={instruction}
                       onChange={(e) => setInstruction(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && instruction.trim() && generate(instruction.trim())}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && instruction.trim()) runGenerate(instruction.trim()) }}
                     />
-                    <button className="btn" disabled={generating || !instruction.trim()} onClick={() => generate(instruction.trim())}>
-                      Revise
-                    </button>
+                    <ActionButton
+                      className="btn"
+                      idleLabel="Revise"
+                      runningLabel="Revising…"
+                      disabled={generating || !instruction.trim()}
+                      onAct={() => generate(instruction.trim())}
+                    />
                   </div>
+                  <DraftHistory history={app.materials.history ?? []} onRestore={restoreSnapshot} nowISO={nowISO} />
                 </>
               )}
               {genError && <p className="form-error" role="alert">{genError}</p>}

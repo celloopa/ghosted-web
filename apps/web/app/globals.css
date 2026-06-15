@@ -416,7 +416,7 @@ a {
 /* ---- apply workspace ---- */
 
 .apply-flow {
-  --apply-width: min(1760px, calc(100vw - 64px));
+  --apply-width: min(1040px, calc(100vw - 48px));
   width: var(--apply-width);
   max-width: var(--apply-width);
   margin-left: calc((100% - var(--apply-width)) / 2);
@@ -889,7 +889,7 @@ a {
 
 .finale-notes {
   width: 100%;
-  min-height: 80px;
+  min-height: 120px;
   margin-top: 8px;
   resize: vertical;
 }
@@ -1345,4 +1345,149 @@ a {
   color: var(--text-muted);
   text-decoration: underline;
   text-decoration-color: var(--border-subtle);
+}
+
+/* ---- ActionButton ---- */
+
+/* Transparent inline-flex wrapper; holds the .btn and an optional .action-error below it.
+   Behaves as one flex item inside .row containers. No background/border/padding of its own. */
+.action-btn {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+/* Small inline spinner shown inside the button while an action is running. */
+@keyframes action-spin {
+  to { transform: rotate(360deg); }
+}
+
+.action-spinner {
+  display: inline-block;
+  vertical-align: -1px;
+  margin-right: 6px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 999px;
+  animation: action-spin 600ms linear infinite;
+}
+
+/* Inline error text beneath the button. */
+.action-error {
+  margin: 0;
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: var(--state-danger);
+}
+
+/* Respect reduced-motion — freeze the spinner. */
+@media (prefers-reduced-motion: reduce) {
+  .action-spinner {
+    animation: none;
+  }
+}
+
+/* ---- cover-letter document + targeted revise ---- */
+
+/* Full-width letter-on-a-page rendering. Grows with content; no height cap. */
+.cover-letter-doc {
+  width: 100%;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  padding: 24px 28px;
+  min-height: 360px;
+  max-height: none;
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+
+@media (max-width: 700px) {
+  .cover-letter-doc {
+    padding: 16px 18px;
+  }
+}
+
+/* Container below the letter for targeted-revise controls. */
+.letter-revise {
+  margin-top: 14px;
+}
+
+/* Full-width instruction textarea; inherits .input styling when both classes applied. */
+.revise-textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+}
+
+/* Secondary "regen everything" section — visually quieter than the targeted revise block. */
+.regen-everything {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.regen-everything .dim {
+  color: var(--text-muted);
+}
+
+/* ---- draft history ---- */
+
+/* Collapsible <details> panel styled as a calm, squared card. */
+.draft-history {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  padding: 12px 14px;
+  margin-top: 16px;
+}
+
+/* <summary> element — clean header with no default disclosure triangle. */
+.draft-history-summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary);
+  list-style: none;
+}
+
+.draft-history-summary::-webkit-details-marker {
+  display: none;
+}
+
+.draft-history[open] .draft-history-summary {
+  margin-bottom: 10px;
+}
+
+/* One snapshot row inside the history panel. */
+.draft-history-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+}
+
+.draft-history-row:first-of-type {
+  border-top: none;
+}
+
+/* Timestamp column — doesn't shrink. */
+.draft-history-time {
+  flex-shrink: 0;
+}
+
+/* One-line preview; takes remaining space and truncates. */
+.draft-history-preview {
+  flex: 1 1 200px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
