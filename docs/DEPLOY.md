@@ -74,6 +74,28 @@ In Coolify → Service → Domains:
 
 ---
 
+## 2e. Alternative: Codex (ChatGPT subscription) house account
+
+Instead of the Claude setup-token, the house account can generate through the
+Codex CLI on the owner's ChatGPT subscription. To switch to Codex, set these
+runtime env vars in Coolify (no quotes):
+
+| Variable | Notes |
+|---|---|
+| `GHOSTED_HOUSE_PROVIDER` | `codex` |
+| `GHOSTED_HOUSE_MODEL` | `gpt-5.5` (or remove any leftover Claude value — a non-codex value is ignored and falls back to `gpt-5.5`) |
+| `GHOSTED_CODEX_AUTH_B64` | Output of `base64 -i ~/.codex/auth.json` on the owner's Mac (Linux: `base64 -w0 ~/.codex/auth.json`). This is a secret — it's the ChatGPT login. |
+| `GHOSTED_CODEX_AUTH_RESEED` | Optional. Set to `1` to force re-seeding `auth.json` after you update `GHOSTED_CODEX_AUTH_B64` — otherwise it is seeded once and then maintained by Codex on the volume. |
+
+`GHOSTED_HOUSE_TOKEN` is not needed in Codex mode.
+
+At container start, `apps/web/docker-entrypoint.sh` decodes `GHOSTED_CODEX_AUTH_B64`
+into `auth.json` inside `CODEX_HOME`. `CODEX_HOME` is set to
+`/app/apps/web/.ghosted-local/.codex` — inside the `ghosted-local-data` named
+volume from section 2c — so refreshed/rotated tokens persist across redeploys.
+
+---
+
 ## 3. Deploy
 
 Click **Deploy** in Coolify. The build takes 2–4 minutes on first run (pnpm

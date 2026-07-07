@@ -94,7 +94,8 @@ export async function POST(req: NextRequest) {
 
   const legacyModel = modelForAuth(auth)
   // Resolve which runner + effective model to use.
-  const bodyModel = typeof body.model === 'string' ? body.model.trim() : undefined
+  // House account: force the house model — ignore any client model to avoid misrouting.
+  const bodyModel = !usingHouse && typeof body.model === 'string' ? body.model.trim() : undefined
   const catalogProvider = bodyModel
     ? findCatalogEntry(FALLBACK_MODEL_CATALOG, 'anthropic', bodyModel)?.provider ??
       findCatalogEntry(FALLBACK_MODEL_CATALOG, 'openai', bodyModel)?.provider ??

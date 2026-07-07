@@ -1,15 +1,26 @@
 /**
- * Server-side "house account" — the owner's Claude subscription used when
- * a visitor has no AI connection of their own.  The token is NEVER returned
- * to the browser: it stays entirely in server-side API route code.
+ * Server-side "house account" — the owner's AI subscription used when a
+ * visitor has no AI connection of their own.  Secrets are NEVER returned to
+ * the browser: they stay entirely in server-side API route code.
+ *
+ * Two house paths are supported, selected by GHOSTED_HOUSE_PROVIDER:
+ *
+ *   - codex (GHOSTED_HOUSE_PROVIDER=codex): the owner's Codex CLI / ChatGPT
+ *     subscription. Auth is a ~/.codex/auth.json file seeded into CODEX_HOME
+ *     at container start (see docker-entrypoint.sh) — there is no token in
+ *     the app env for this path. Enabled purely by setting the provider.
+ *   - anthropic (default): the owner's Claude subscription via a
+ *     `claude setup-token` oauth token, supplied through GHOSTED_HOUSE_TOKEN.
  *
  * Env vars:
+ *   GHOSTED_HOUSE_PROVIDER — 'anthropic' (default) | 'codex'
  *   GHOSTED_HOUSE_TOKEN    — sk-ant-oat… produced by `claude setup-token`
- *   GHOSTED_HOUSE_PROVIDER — default 'anthropic'
- *   GHOSTED_HOUSE_MODEL    — default 'claude-sonnet-4-6'
+ *                            (anthropic path only; ignored for codex)
+ *   GHOSTED_HOUSE_MODEL    — default 'claude-sonnet-4-6' (anthropic) or
+ *                            'gpt-5.5' (codex)
  */
 
-import { validateAIAuth, type AIAuth, type AIProvider } from '@ghosted/core'
+import { validateAIAuth, AI_MODEL_OPTIONS, type AIAuth, type AIProvider } from '@ghosted/core'
 
 /**
  * Returns true when the auth requires a local CLI binary (claude or codex).
@@ -21,24 +32,31 @@ export function isCliBasedAuth(auth: AIAuth): boolean {
 
 /**
  * Build an AIAuth from the GHOSTED_HOUSE_* environment variables.
- * Returns null when GHOSTED_HOUSE_TOKEN is unset (gate is off).
+ * Returns null when no house account is configured (gate is off).
  */
 export function houseConnection(): AIAuth | null {
+  const provider = (process.env.GHOSTED_HOUSE_PROVIDER ?? 'anthropic') as AIProvider
+
+  if (provider === 'codex') {
+    // Codex house: auth is a ~/.codex/auth.json file seeded into CODEX_HOME at
+    // container start — there is no token in the app env. Enabled purely by
+    // GHOSTED_HOUSE_PROVIDER=codex. Guard the model so a leftover Claude value
+    // in GHOSTED_HOUSE_MODEL can't misroute to a non-codex model.
+    const wanted = process.env.GHOSTED_HOUSE_MODEL
+    const model = AI_MODEL_OPTIONS.some((m) => m.provider === 'codex' && m.id === wanted) ? wanted! : 'gpt-5.5'
+    return { provider: 'codex', method: 'local_cli', model }
+  }
+
+  // Anthropic house (existing behavior): requires the setup-token.
   const token = process.env.GHOSTED_HOUSE_TOKEN
   if (!token) return null
-
-  const provider = (process.env.GHOSTED_HOUSE_PROVIDER ?? 'anthropic') as AIProvider
   const model = process.env.GHOSTED_HOUSE_MODEL ?? 'claude-sonnet-4-6'
+  return { provider, method: 'oauth_token', key: token, model }
+}
 
-  // Only anthropic oauth_token is supported for the house path today.
-  // If someone sets a different provider we still try, but validation will
-  // catch it and surface a clear error rather than silently failing.
-  return {
-    provider,
-    method: 'oauth_token',
-    key: token,
-    model,
-  }
+/** True when any house account (Codex or Anthropic) is configured. */
+export function isHouseConfigured(): boolean {
+  return houseConnection() !== null
 }
 
 export type ResolveResult =

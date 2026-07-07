@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { houseConnection, resolveConnection, isCliBasedAuth } from '../lib/server/houseConnection'
+import { houseConnection, resolveConnection, isCliBasedAuth, isHouseConfigured } from '../lib/server/houseConnection'
 import type { AIAuth } from '@ghosted/core'
 
 // Save originals so we can restore them.
@@ -69,6 +69,44 @@ describe('houseConnection', () => {
     const auth = houseConnection()
     expect(auth?.model).toBe('claude-haiku-4-5')
   })
+
+  it('codex provider + no token → returns a codex local_cli auth with the default model', () => {
+    setEnv({ GHOSTED_HOUSE_PROVIDER: 'codex' })
+    const auth = houseConnection()
+    expect(auth).toEqual({ provider: 'codex', method: 'local_cli', model: 'gpt-5.5' })
+  })
+
+  it('codex provider + valid codex model override', () => {
+    setEnv({ GHOSTED_HOUSE_PROVIDER: 'codex', GHOSTED_HOUSE_MODEL: 'gpt-5-mini' })
+    const auth = houseConnection()
+    expect(auth?.model).toBe('gpt-5-mini')
+  })
+
+  it('codex provider + a non-codex model value falls back to the default codex model', () => {
+    setEnv({ GHOSTED_HOUSE_PROVIDER: 'codex', GHOSTED_HOUSE_MODEL: 'claude-sonnet-4-6' })
+    const auth = houseConnection()
+    expect(auth?.model).toBe('gpt-5.5')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// isHouseConfigured
+// ---------------------------------------------------------------------------
+
+describe('isHouseConfigured', () => {
+  it('is true when the codex house is configured', () => {
+    setEnv({ GHOSTED_HOUSE_PROVIDER: 'codex' })
+    expect(isHouseConfigured()).toBe(true)
+  })
+
+  it('is true when the anthropic house token is set', () => {
+    setEnv({ GHOSTED_HOUSE_TOKEN: 'sk-ant-oat01-test-token-long-enough-here' })
+    expect(isHouseConfigured()).toBe(true)
+  })
+
+  it('is false when neither house env is set', () => {
+    expect(isHouseConfigured()).toBe(false)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -129,6 +167,15 @@ describe('resolveConnection', () => {
   it('returns an error when request auth is invalid and house token is unset', () => {
     const result = resolveConnection(invalidRequestAuth)
     expect('error' in result).toBe(true)
+  })
+
+  it('falls back to the codex house when configured and no request auth is provided', () => {
+    setEnv({ GHOSTED_HOUSE_PROVIDER: 'codex' })
+    const result = resolveConnection(undefined)
+    expect('error' in result).toBe(false)
+    if ('error' in result) return
+    expect(result.usingHouse).toBe(true)
+    expect(result.auth.provider).toBe('codex')
   })
 
   it('does not include the house token in error responses', () => {
