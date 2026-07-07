@@ -173,7 +173,12 @@ export async function POST(req: NextRequest) {
     }
     return successRes
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'generation failed'
+    let message = e instanceof Error ? e.message : 'generation failed'
+    // A failing BYOK connection on a hosted deploy has a one-click way out —
+    // say so instead of leaving the visitor stuck on a dead key.
+    if (!usingHouse && isHouseConfigured()) {
+      message += ' — your connected key failed; disconnect it in Settings to use the shared account instead'
+    }
     await recordGenerationRun({ auth, model, prompt, text: '', rawUsage: null, started, ok: false, usingHouse, error: message }).catch(() => undefined)
     console.log(JSON.stringify({ kind: 'generate_error', method: auth.method, provider: auth.provider, model, ms: Date.now() - started, message }))
     return NextResponse.json({ error: message }, { status: 502 })
@@ -210,7 +215,9 @@ async function runCodexCLI(prompt: string, model: string): Promise<string> {
     await new Promise<void>((resolve, reject) => {
       const child = execFile(
         bin,
-        ['exec', '--ephemeral', '--sandbox', 'read-only', '--model', model, '-c', 'model_reasoning_effort="low"', '--output-last-message', outPath, '-'],
+        // --skip-git-repo-check: the server cwd is not a git repo; without the
+        // flag codex refuses to run ("Not inside a trusted directory").
+        ['exec', '--skip-git-repo-check', '--ephemeral', '--sandbox', 'read-only', '--model', model, '-c', 'model_reasoning_effort="low"', '--output-last-message', outPath, '-'],
         { timeout: CLI_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, env: hardendedEnv(), cwd: process.cwd() },
         (err, stdout, stderr) => {
           if (err) {
@@ -254,7 +261,10 @@ async function callAnthropic(prompt: string, auth: AIAuth, model: string): Promi
   })
   if (!res.ok) {
     const errBody = (await res.json().catch(() => null)) as { error?: { message?: string } } | null
-    throw new Error(errBody?.error?.message ?? `Anthropic API answered ${res.status}`)
+    // Always include the HTTP status — a bare provider message like "Error"
+    // is undiagnosable from the logs.
+    const detail = errBody?.error?.message
+    throw new Error(detail ? `Anthropic API ${res.status}: ${detail}` : `Anthropic API answered ${res.status}`)
   }
   const data = (await res.json()) as { content?: { type: string; text?: string }[]; usage?: unknown }
   const text = (data.content ?? [])
@@ -278,7 +288,8 @@ async function callOpenAI(prompt: string, auth: AIAuth, model: string): Promise<
   })
   if (!res.ok) {
     const errBody = (await res.json().catch(() => null)) as { error?: { message?: string } } | null
-    throw new Error(errBody?.error?.message ?? `OpenAI API answered ${res.status}`)
+    const detail = errBody?.error?.message
+    throw new Error(detail ? `OpenAI API ${res.status}: ${detail}` : `OpenAI API answered ${res.status}`)
   }
   const data = (await res.json()) as { output_text?: string; usage?: unknown; output?: { content?: { type?: string; text?: string }[] }[] }
   const text =
