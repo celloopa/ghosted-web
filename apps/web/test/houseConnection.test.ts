@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { houseConnection, resolveConnection, isCliBasedAuth, isHouseConfigured } from '../lib/server/houseConnection'
+import { houseConnection, resolveConnection, isCliBasedAuth, isHouseConfigured, isForbiddenCliBypass } from '../lib/server/houseConnection'
 import type { AIAuth } from '@ghosted/core'
 
 // Save originals so we can restore them.
@@ -307,5 +307,39 @@ describe('resolveConnection — CLI fallback', () => {
     if ('error' in result) return
     expect(result.usingHouse).toBe(true)
     expect(result.auth.key).toBe(VALID_HOUSE_TOKEN)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// isForbiddenCliBypass — the /api/generate security guard predicate (Change 1b)
+// ---------------------------------------------------------------------------
+
+describe('isForbiddenCliBypass', () => {
+  it('BYOK request (usingHouse false) routed to codex_cli → forbidden', () => {
+    expect(isForbiddenCliBypass(false, 'codex_cli')).toBe(true)
+  })
+
+  it('BYOK request (usingHouse false) routed to claude_cli → forbidden', () => {
+    expect(isForbiddenCliBypass(false, 'claude_cli')).toBe(true)
+  })
+
+  it('house request (usingHouse true) routed to codex_cli → allowed (that IS the house path)', () => {
+    expect(isForbiddenCliBypass(true, 'codex_cli')).toBe(false)
+  })
+
+  it('house request (usingHouse true) routed to claude_cli → allowed', () => {
+    expect(isForbiddenCliBypass(true, 'claude_cli')).toBe(false)
+  })
+
+  it('BYOK request routed to anthropic_api → allowed (not a CLI route)', () => {
+    expect(isForbiddenCliBypass(false, 'anthropic_api')).toBe(false)
+  })
+
+  it('BYOK request routed to openai_api → allowed (not a CLI route)', () => {
+    expect(isForbiddenCliBypass(false, 'openai_api')).toBe(false)
+  })
+
+  it('BYOK request routed to legacy → allowed (legacy path predates the house gate)', () => {
+    expect(isForbiddenCliBypass(false, 'legacy')).toBe(false)
   })
 })

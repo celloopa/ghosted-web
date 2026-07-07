@@ -59,6 +59,17 @@ export function isHouseConfigured(): boolean {
   return houseConnection() !== null
 }
 
+/**
+ * True when a request would bypass the house account's daily cap by routing
+ * a BYOK (bring-your-own-key) request through a server-side CLI binary. The
+ * claude/codex CLIs on a hosted server are wired to the OWNER's subscription
+ * — they are not a BYOK offer, so a request that did not resolve to the
+ * house account has no business running through them.
+ */
+export function isForbiddenCliBypass(usingHouse: boolean, runner: string): boolean {
+  return !usingHouse && (runner === 'codex_cli' || runner === 'claude_cli')
+}
+
 export type ResolveResult =
   | { auth: AIAuth; usingHouse: boolean }
   | { error: string }

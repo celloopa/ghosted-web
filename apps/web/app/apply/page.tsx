@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   analyzeFit,
   buildAnswerPrompt,
@@ -36,10 +36,11 @@ import {
 import { useApps } from '../../lib/useApps'
 import { useBaseline } from '../../lib/useBaseline'
 import { useAIAuth } from '../../lib/useAIAuth'
-import { useHosted } from '../../lib/useHosted'
+import { useHostedConfig } from '../../lib/useHosted'
 import { ActionButton } from '../../components/ActionButton'
 import { ConnectAI } from '../../components/ConnectAI'
 import { DraftHistory } from '../../components/DraftHistory'
+import { GenerationStatus } from '../../components/GenerationStatus'
 import { ModelPicker } from '../../components/ModelPicker'
 import { QuestionsPanel } from '../../components/QuestionsPanel'
 import { RewritesPanel } from '../../components/RewritesPanel'
@@ -419,6 +420,8 @@ function formatTokenCount(n: number): string {
 }
 
 function CostEstimate({ promptStr, auth, chosenModel }: { promptStr: string; auth: import('@ghosted/core').AIAuth | null | undefined; chosenModel?: string }) {
+  const { hosted, house } = useHostedConfig()
+
   const estimate = useMemo(() => {
     if (!auth) return null
     const inTokens = Math.ceil(promptStr.length / 4)
@@ -436,7 +439,18 @@ function CostEstimate({ promptStr, auth, chosenModel }: { promptStr: string; aut
     return { totalTokens, costStr, modelLabel }
   }, [promptStr, auth, chosenModel])
 
-  if (!estimate) return null
+  // No connection of your own: riding the house account (if any) has no
+  // per-call price — it's a subscription. Show the token count and whose
+  // account it runs on; without a house account there is nothing to show.
+  if (!estimate) {
+    if (!hosted) return null
+    const totalTokens = Math.ceil(promptStr.length / 4) + ASSUMED_OUTPUT_TOKENS
+    return (
+      <span className="dim small mono cost-estimate">
+        {`≈ ${formatTokenCount(totalTokens)} tokens · shared subscription · ${house?.label ?? 'configured'}`}
+      </span>
+    )
+  }
 
   return (
     <span className="dim small mono cost-estimate">
@@ -626,6 +640,10 @@ function Finale({
   const [qaGenerating, setQaGenerating] = useState(false)
   const [qaError, setQaError] = useState<string | null>(null)
 
+  // The model that actually served the last call — the server decides (house
+  // account forces its own model), so trust the response over the local pick.
+  const servedModelRef = useRef<string | undefined>(undefined)
+
   async function callModelRaw(prompt: string, task: 'revision' | 'answer'): Promise<string> {
     const res = await fetch('/api/generate', {
       method: 'POST',
@@ -634,6 +652,7 @@ function Finale({
     })
     const data = (await res.json()) as { text?: string; model?: string; error?: string }
     if (!res.ok || !data.text) throw new Error(data.error ?? 'generation failed')
+    if (data.model) servedModelRef.current = data.model
     return data.text
   }
 
@@ -758,7 +777,7 @@ function Finale({
         opportunity_angles: result.opportunity_angles,
         standout_suggestions: result.standout_suggestions,
         generated_at: at,
-        model: chosenModel || (auth ? modelForAuth(auth) : undefined),
+        model: servedModelRef.current ?? (chosenModel || (auth ? modelForAuth(auth) : undefined)),
         revisions: (materials.revisions ?? 0) + 1,
       }
       await updateApplication({ ...app, materials: updated })
@@ -804,7 +823,7 @@ function Finale({
         ...snapped,
         cover_letter: letter,
         generated_at: at,
-        model: chosenModel || (auth ? modelForAuth(auth) : undefined),
+        model: servedModelRef.current ?? (chosenModel || (auth ? modelForAuth(auth) : undefined)),
         revisions: (materials.revisions ?? 0) + 1,
       }
       await updateApplication({ ...app, materials: updated })
@@ -996,6 +1015,7 @@ function Finale({
               <ModelPicker />
             </div>
           </div>
+          <GenerationStatus active={revising} kind="revise" />
           {reviseError && <p className="form-error" role="alert" style={{ marginTop: 8 }}>{reviseError}</p>}
         </div>
 
@@ -1114,6 +1134,7 @@ function Finale({
       {/* Application Q&A */}
       <div className="finale-section reveal-3">
         {qaError && <p className="form-error" role="alert" style={{ marginBottom: 8 }}>{qaError}</p>}
+        <GenerationStatus active={qaGenerating} kind="answer" />
         <QuestionsPanel
           qa={app.materials?.qa ?? []}
           busy={qaGenerating}
@@ -1167,7 +1188,7 @@ function Workspace({ app }: { app: Application }) {
   const { updateApplication, transitionTo } = useApps()
   const { baseline } = useBaseline()
   const { auth, connect } = useAIAuth()
-  const hosted = useHosted()
+  const { hosted, house } = useHostedConfig()
   const { model: chosenModel } = useModelChoice()
   const router = useRouter()
 
@@ -1226,6 +1247,10 @@ function Workspace({ app }: { app: Application }) {
     return buildGenerationPrompt(genInput, revision)
   }, [genInput, instruction, app.materials])
 
+  // The model that actually served the last call — the server decides (house
+  // account forces its own model), so trust the response over the local pick.
+  const servedModelRef = useRef<string | undefined>(undefined)
+
   async function callModel(prompt: string) {
     const res = await fetch('/api/generate', {
       method: 'POST',
@@ -1234,6 +1259,7 @@ function Workspace({ app }: { app: Application }) {
     })
     const data = (await res.json()) as { text?: string; model?: string; error?: string }
     if (!res.ok || !data.text) throw new Error(data.error ?? 'generation failed')
+    if (data.model) servedModelRef.current = data.model
     const parsed = parseGeneration(data.text)
     if (!parsed.ok) throw new Error(parsed.error)
     return parsed
@@ -1279,7 +1305,7 @@ function Workspace({ app }: { app: Application }) {
         opportunity_angles: result.opportunity_angles,
         standout_suggestions: result.standout_suggestions,
         generated_at: at,
-        model: chosenModel || (auth ? modelForAuth(auth) : undefined),
+        model: servedModelRef.current ?? (chosenModel || (auth ? modelForAuth(auth) : undefined)),
         revisions: (app.materials?.revisions ?? 0) + (revisionInstruction ? 1 : 0),
       }
       await updateApplication({ ...app, materials })
@@ -1366,6 +1392,19 @@ function Workspace({ app }: { app: Application }) {
     return <Finale app={app} onSwitchToWorkspace={() => setView('workspace')} />
   }
 
+  // Label for the status ticker: the house model when riding the shared
+  // account (no auth of your own), otherwise the picked/auth-derived model.
+  const generationModelLabel = (() => {
+    if (!auth && hosted) return house?.label
+    const effectiveModel = chosenModel || (auth ? modelForAuth(auth) : undefined)
+    if (!effectiveModel) return undefined
+    return (
+      (auth && findCatalogEntry(FALLBACK_MODEL_CATALOG, auth.provider, effectiveModel)?.label) ??
+      FALLBACK_MODEL_CATALOG.find((e) => e.id === effectiveModel)?.label ??
+      effectiveModel
+    )
+  })()
+
   return (
     <div className="apply-flow">
       <ApplyFlowChrome
@@ -1426,7 +1465,7 @@ function Workspace({ app }: { app: Application }) {
         </aside>
 
         <main className="materials-main">
-          {generating && <LoadingPanel title="Writing editable materials" detail="Drafting cover letter, resume rewrites, opportunity angles, and standout moves from your existing evidence." />}
+          <GenerationStatus active={generating} modelLabel={generationModelLabel} kind="generate" />
           {!auth && !hosted ? (
             <div className="card">
               <p className="dim small">Connect your AI to draft editable materials. Tracking still works without it.</p>

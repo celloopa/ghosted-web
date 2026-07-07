@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { execFile } from 'node:child_process'
 import { homedir } from 'node:os'
 import { FALLBACK_MODEL_CATALOG, mergeModelCatalog, normalizeOpenRouterModel, type ModelCatalogEntry } from '@ghosted/core'
+import { isHouseConfigured } from '../../../lib/server/houseConnection'
 
 const MODEL_REVALIDATE_SECONDS = 43200
 export const revalidate = 43200
@@ -29,10 +30,15 @@ function probeCli(envBin: string | undefined, fallbackName: string): Promise<boo
 }
 
 export async function GET() {
+  // Server CLIs belong to the house account — they are not a BYOK offer. When
+  // a house account is configured, never advertise claude_cli/codex_cli as
+  // available to visitors (and skip the probe subprocess spawns entirely).
+  const houseGated = isHouseConfigured()
+
   const [refreshed, claudeCli, codexCli] = await Promise.all([
     fetchOpenRouterCatalog().catch((): ModelCatalogEntry[] => []),
-    probeCli(process.env.GHOSTED_CLAUDE_BIN, 'claude'),
-    probeCli(process.env.GHOSTED_CODEX_BIN, 'codex'),
+    houseGated ? Promise.resolve(false) : probeCli(process.env.GHOSTED_CLAUDE_BIN, 'claude'),
+    houseGated ? Promise.resolve(false) : probeCli(process.env.GHOSTED_CODEX_BIN, 'codex'),
   ])
   return NextResponse.json({
     models: mergeModelCatalog(FALLBACK_MODEL_CATALOG, refreshed),

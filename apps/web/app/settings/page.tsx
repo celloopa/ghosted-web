@@ -6,6 +6,7 @@ import { describeAIAuth, parseV1Import, validateCVJson } from '@ghosted/core'
 import { useApps } from '../../lib/useApps'
 import { useBaseline } from '../../lib/useBaseline'
 import { useAIAuth } from '../../lib/useAIAuth'
+import { useHostedConfig } from '../../lib/useHosted'
 import { ConnectAI } from '../../components/ConnectAI'
 import { strings } from '../../lib/strings'
 
@@ -21,6 +22,7 @@ export default function Settings() {
   const { apps, importApps, replaceAll } = useApps()
   const { baseline, status, clear: clearBaseline } = useBaseline()
   const { auth, connect, disconnect } = useAIAuth()
+  const { hosted, house } = useHostedConfig()
   const [showConnect, setShowConnect] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [errors, setErrors] = useState<string[]>([])
@@ -97,8 +99,17 @@ export default function Settings() {
         </div>
       </section>
 
+      {hosted && (
+        <section className="section">
+          <div className="card">
+            <p className="small">✓ generating on the shared account — {house?.label ?? 'configured'}. nothing to set up.</p>
+            <p className="dim small">connect your own key below only if you would rather use it.</p>
+          </div>
+        </section>
+      )}
+
       <section className="section">
-        <h2 className="section-title">AI connection + model</h2>
+        <h2 className="section-title">{hosted ? 'Use your own key instead' : 'AI connection + model'}</h2>
         {auth && !showConnect ? (
           <>
             <p className="small">
@@ -111,7 +122,10 @@ export default function Settings() {
               <button
                 className="btn-link danger"
                 onClick={async () => {
-                  if (confirm('Disconnect? Document drafting turns off until you reconnect.')) {
+                  const consequence = hosted
+                    ? 'Drafting falls back to the shared account.'
+                    : 'Document drafting turns off until you reconnect.'
+                  if (confirm(`Disconnect? ${consequence}`)) {
                     await disconnect()
                   }
                 }}
@@ -122,7 +136,13 @@ export default function Settings() {
           </>
         ) : (
           <>
-            {!auth && <p className="small dim">Not connected — tracking works, document drafting stays off. Pick Codex CLI here if you want to use your Codex subscription locally.</p>}
+            {!auth && (
+              <p className="small dim">
+                {hosted
+                  ? 'not connected — generation still works on the shared account above. connect your own key if you want a different model or your own usage.'
+                  : 'Not connected — tracking works, document drafting stays off. Pick Codex CLI here if you want to use your Codex subscription locally.'}
+              </p>
+            )}
             <ConnectAI
               current={auth ?? undefined}
               onConnect={async (a) => {

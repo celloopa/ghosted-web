@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { FALLBACK_MODEL_CATALOG, findCatalogEntry, modelForAuth, type AIAuth, type GenerationRunRecord } from '@ghosted/core'
 import { recordGenerationRun } from '../../../lib/server/generationTelemetry'
 import { resolveRunner } from '../../../lib/server/resolveRunner'
-import { resolveConnection } from '../../../lib/server/houseConnection'
+import { resolveConnection, isHouseConfigured, isForbiddenCliBypass } from '../../../lib/server/houseConnection'
 import { checkAndIncrement } from '../../../lib/server/genCap'
 
 // Runs the ONE bounded generation prompt through whichever local connection
@@ -105,6 +105,16 @@ export async function POST(req: NextRequest) {
   if (runnerResult.runner === 'error') {
     return NextResponse.json({ error: runnerResult.errorMessage ?? 'invalid model' }, { status: 400 })
   }
+
+  // Server CLIs are the house account's private path. A BYOK request must not
+  // route through them (it would bypass the house daily cap).
+  if (isHouseConfigured() && isForbiddenCliBypass(usingHouse, runnerResult.runner)) {
+    return NextResponse.json(
+      { error: 'that model runs on the shared account — clear your own connection in Settings to use it' },
+      { status: 400 },
+    )
+  }
+
   const model = runnerResult.model
   const started = Date.now()
   try {

@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { FALLBACK_MODEL_CATALOG, runnableWith, type ModelCatalogEntry } from '@ghosted/core'
+import { FALLBACK_MODEL_CATALOG, type ModelCatalogEntry } from '@ghosted/core'
 import { useAIAuth } from '../lib/useAIAuth'
+import { useHostedConfig } from '../lib/useHosted'
 import { useModelChoice } from '../lib/useModelChoice'
 import { buildPickerEntries } from '../lib/pickerModels'
 
@@ -24,6 +25,7 @@ interface ModelsResponse {
  */
 export function ModelPicker() {
   const { auth } = useAIAuth()
+  const { hosted, house } = useHostedConfig()
   const [catalog, setCatalog] = useState<ModelCatalogEntry[]>(FALLBACK_MODEL_CATALOG)
   const [available, setAvailable] = useState<{ claude_cli: boolean; codex_cli: boolean }>({
     claude_cli: false,
@@ -70,6 +72,23 @@ export function ModelPicker() {
   const { model, setModel } = useModelChoice(firstRunnable?.id ?? '', allEntries)
 
   const bothEmpty = claudeEntries.length === 0 && openaiEntries.length === 0
+
+  // Riding the shared account with no connection of your own: there is
+  // nothing to pick — the house model is fixed. Show a read-only indicator
+  // instead of a select that implies a choice that isn't actually offered.
+  if (hosted && !auth) {
+    return (
+      <div className="field house-chip">
+        <span className="field-label">Model</span>
+        <span
+          className="house-chip-body mono"
+          title="generation runs on the shared account. connect your own key in settings to pick a model."
+        >
+          shared account · {house?.label ?? 'configured'}
+        </span>
+      </div>
+    )
+  }
 
   return (
     <div>

@@ -987,6 +987,56 @@ a {
   width: auto;
 }
 
+/* ---- house chip: read-only stand-in for the model select when riding the
+   shared account (there is nothing to pick, so no select is offered) ---- */
+
+.house-chip-body {
+  display: inline-block;
+  color: var(--text-muted);
+  font-size: 0.85em;
+  padding: 6px 0;
+}
+
+/* ---- generation status: honest phase + elapsed-time ticker ---- */
+
+.generation-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 10px 0;
+  animation: motion-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.generation-status-spinner {
+  margin-top: 2px;
+  color: var(--accent);
+}
+
+.generation-status-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.generation-status-line {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.generation-status-timer {
+  color: var(--accent);
+}
+
+.generation-status-sub {
+  display: block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .generation-status {
+    animation: none;
+  }
+}
+
 .model-picker-inline p {
   display: none;
 }
