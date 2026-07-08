@@ -285,12 +285,16 @@ export default function Detail() {
             <button className="btn btn-small" onClick={() => setEditing(true)}>Edit</button>
           </div>
           {app.closed_reason && <Fact label="closed" value={app.closed_reason} />}
-          {app.needs_materials && (
+          {/* There's always a path back to the apply workspace — otherwise materials
+              become unreachable the moment needs_materials gets cleared (e.g. "already
+              applied" or finalizing). Once materials exist, the Documents section below
+              is the entry point, so this Fact steps aside. */}
+          {!app.materials && (
             <Fact
               label="workspace"
               value={
                 <Link href={`/apply?id=${app.id}`} className="link">
-                  needed — open the apply workspace
+                  {app.posting ? 'generate materials' : 'add posting & generate materials'}
                 </Link>
               }
             />
